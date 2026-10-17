@@ -63,6 +63,11 @@ pub const TIER_VALUABLE: u8 = 2;
 pub const TIER_PRECIOUS: u8 = 3;
 pub const TIER_TREASURE: u8 = 4;
 
+/// Treasure-role goods are produced at this share of the volume the world economy
+/// would otherwise give them (goods batch G2, `compute_economy`): a rich gold
+/// district yields a fraction of a grain belt and earns by value instead.
+pub const TREASURE_VOLUME: f32 = 0.08;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoodDna {
     pub role: GoodRole,
@@ -239,6 +244,25 @@ mod goods_dna_tests {
         for s in list.iter().filter(|s| s.distribution == Distribution::Manufactured) {
             assert_eq!(dna_of(s).origin, GoodOrigin::Crafted, "{}", s.id);
         }
+    }
+
+    /// G2: treasure is worth treasure and is bullion, not a tool metal; the repair
+    /// also applies to a world saved with the old values.
+    #[test]
+    fn goods_treasure_has_real_value_and_its_own_category() {
+        let list = default_list();
+        let get = |id: &str| list.iter().find(|s| s.id == id).unwrap();
+        let (gold, silver) = (get("gold"), get("silver"));
+        assert_eq!((gold.category.as_str(), silver.category.as_str()), ("bullion", "bullion"));
+        assert!((gold.base_value / silver.base_value - 10.0).abs() < 0.01, "gold:silver 1:10");
+        for id in ["silver", "ruby", "diamond", "saffron", "nutmeg", "tyrian_purple"] {
+            assert!(get(id).base_value > 1.0, "{id} must not be worth exactly a unit of grain");
+        }
+        let mut old = vec![silver.clone()];
+        old[0].base_value = 1.0;
+        old[0].category = "metal".into();
+        crate::sim::goods_spec::backfill_market_fields(&mut old);
+        assert_eq!((old[0].base_value, old[0].category.as_str()), (5.0, "bullion"));
     }
 
     #[test]

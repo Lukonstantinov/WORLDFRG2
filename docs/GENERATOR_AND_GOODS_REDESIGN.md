@@ -820,3 +820,33 @@ libraries get it too. The goods editor shows and edits the six properties. **No 
 reads them yet** (the next slices do), so no generated world or campaign changed.
 Gates: `goods_` 21/21 (3 new: every shipped good hand-classified, treasure is never a tool
 metal, crafted goods are crafted), tsc clean, `check_types` 0 drift (278).
+
+**Slice G2: gold and silver stop being casual (2026-10-17, done).** Four causes, four fixes:
+1. **New finding, not in §3.2: silver, every split gem and most rare luxuries were worth
+   exactly 1.0, the same as grain.** The constructor for declarative goods (`cg()`)
+   hard-coded `base_value: 1.0`, so silver traded at the price of wheat. They now carry
+   real values (`goods_spec::custom_base_value`: silver 5, so gold:silver is the classic
+   1:10; ruby/sapphire/emerald 40, diamond 60, saffron 40, mace 35, nutmeg 30, Tyrian
+   purple 45…). Applied on every load wherever the value is still the old 1.0, so saved
+   worlds and goods libraries are repaired too.
+2. **Gold and silver are `bullion`, not `metal`** (category). A city short of iron no
+   longer "substitutes" gold. Also repaired on load. Coinage finds gold/silver by name,
+   so minting is unaffected.
+3. **Treasure is scarce in volume** (`goods_dna::TREASURE_VOLUME` = 0.08, `compute_economy`).
+   Treasure-role goods (gold, silver, gems, pearls, jewellery) are produced at 8% of the
+   volume the normalised model gave them, and every "is this town a producer" cut scales
+   with it, so a town with a real working still produces. Before, the best gold town made
+   as many units as the best grain town and the deposit floor of 0.6 made gold 4× as
+   plentiful as wine. Demand is unchanged, so scarcity raises gold's price by itself.
+4. **A house's new gold mine stays scarce too** (`TickGood.volume`, `create_estate`): the
+   estate output floor (0.05/person) is now scaled by the good's volume. Before, a new gold
+   estate out-produced its home city's own mine about 15×.
+The mint's bullion check (`mint_bullion_cap`) reads gold/silver output back at the volume
+it was calibrated on, so mints are not all forced to debase.
+**What the gates can and cannot see:** `econ_`/`tick::tests` run on synthetic fixtures
+with no gold or silver goods, so they cannot measure this slice; they guard that nothing
+else moved. New gates: `treasure_is_scarce_in_volume_but_still_produced_where_mined`
+(a real `compute_economy` run: gold only at the town with the mine, at ≤10% of grain's
+volume), `goods_treasure_has_real_value_and_its_own_category` (incl. the load repair),
+`a_treasure_estate_is_mined_at_treasure_volume`. **Owed:** a look at a real generated
+world's gold/silver prices and producer count in the running app (no display here).

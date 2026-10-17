@@ -3927,6 +3927,12 @@ pub struct TickGood {
     /// `WORK_UNKNOWN` (the serde default, for a save from before this field, or a
     /// non-deposit good) keeps that substring guess as the fallback.
     #[serde(default = "default_working")] pub working: u8,
+    /// Goods batch G2 · share of the ordinary output volume this good is produced
+    /// at: `goods_dna::TREASURE_VOLUME` for treasure (gold, silver, gems, pearls),
+    /// 1.0 for everything else and for a save from before this field. Applied where
+    /// a new estate or mine sets its own output rate (`create_estate`), so a house's
+    /// gold mine stays as scarce as the world's own.
+    #[serde(default = "default_volume")] pub volume: f32,
 }
 
 pub(crate) const DIST_GLOBAL: u8 = 0;
@@ -3943,6 +3949,7 @@ pub(crate) const WORK_PLACER: u8 = 3;
 pub(crate) const WORK_PAN: u8 = 4;
 pub(crate) const WORK_UNKNOWN: u8 = 0;
 fn default_working() -> u8 { WORK_UNKNOWN }
+fn default_volume() -> f32 { 1.0 }
 
 /// One settlement participating in the living economy.
 #[derive(Serialize, Deserialize, Clone, Debug)]

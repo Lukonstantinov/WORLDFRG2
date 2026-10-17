@@ -81,6 +81,9 @@ impl CampaignSim {
             if let Some(i) = si { bull += h.production.get(i).copied().unwrap_or(0.0); }
             demand += h.tw_house + h.tw_local + h.tw_guild;
         }
+        // Gold and silver are produced at TREASURE_VOLUME of their old volume since
+        // goods batch G2; read them back at the volume this cap was calibrated on.
+        let bull = bull / crate::sim::goods_dna::TREASURE_VOLUME;
         let cr = if demand > EPS { bull / (demand * MINT_BULLION_DEMAND) } else { 1.0 };
         let cap = (MINT_FINENESS_FLOOR + (1.0 - MINT_FINENESS_FLOOR) * cr.clamp(0.0, 1.0)).clamp(MINT_FINENESS_FLOOR, 1.0);
         (cap, cr)

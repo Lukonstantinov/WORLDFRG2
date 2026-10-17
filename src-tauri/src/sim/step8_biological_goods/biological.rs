@@ -204,7 +204,7 @@ pub const GOOD_CATEGORY: [&str; GOODS_COUNT] = [
     "prestige", "oil",                                                 // pearls, whaling(oil)
     "cereal", "metal", "fiber", "gem",                                 // wheat, iron, cotton, gemstones (split into gem types; "gem" is fungible)
     "construction", "livestock", "fiber", "fiber", "prestige", "drink", // hardwoods..cacao
-    "metal", "metal", "metal",                                         // copper, tin, gold
+    "metal", "metal", "bullion",                                       // copper, tin, gold (bullion: never a tool metal)
     "aromatic", "aromatic", "craft",                                   // cloves, pepper, paper
     "craft", "craft", "prestige", "dye", "sweetener",                  // ceramics..dates
     "cereal", "cereal", "cereal", "protein", "sweetener", "livestock", "drink", // rice..beer

@@ -597,7 +597,9 @@ impl CampaignSim {
         let ng = self.goods.len();
         let est_pop = base_pop.max(1.0);
         let mut base_per_capita = vec![0.0f32; ng];
-        base_per_capita[g0] = percap.max(0.05);
+        // The 0.05 floor is a rate for ordinary goods; treasure is mined in smaller
+        // volume (G2), or a house's new gold mine out-produces its city's own 15x.
+        base_per_capita[g0] = percap.max(0.05) * self.goods[g0].volume;
         let mut production = vec![0.0f32; ng];
         production[g0] = base_per_capita[g0] * est_pop;
         let id = 100_000 + self.hubs.len() as u32;

@@ -391,6 +391,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 // with no spec, or one whose `distribution` isn't Deposits,
                 // degrades to `WORK_UNKNOWN`, which keeps `estate_kind_for_good`'s
                 // substring cascade as the fallback.
+                volume: match spec {
+                    Some(s) if crate::sim::goods_dna::dna_of(s).role == crate::sim::goods_dna::GoodRole::Treasure => crate::sim::goods_dna::TREASURE_VOLUME,
+                    _ => 1.0,
+                },
                 working: spec.and_then(|s| match s.distribution {
                     crate::sim::goods_spec::Distribution::Deposits => {
                         let w = s.deposit.as_ref().and_then(|d| d.working)

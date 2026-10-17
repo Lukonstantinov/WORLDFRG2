@@ -550,6 +550,17 @@ fn compute_economy_impl(
     let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
     // Same mask computed earlier for the production-crediting split above.
     let is_deposit = &is_deposit_good;
+    // TREASURE is scarce in VOLUME (plan §4.2/§4.4): a rich gold district yields a
+    // small fraction of what a grain belt does, and earns by value instead. Before
+    // this, normalising every good to its best producer (below) let the best gold
+    // town make as many units as the best grain town, and the deposit floor of 0.6
+    // made gold four times as plentiful as wine. `vol` also scales every "is this a
+    // producer" cut below, so a town with a real working still reads as a producer.
+    use crate::sim::goods_dna::TREASURE_VOLUME;
+    let vol: Vec<f32> = (0..gc).map(|g| match specs.get(g) {
+        Some(s) if crate::sim::goods_dna::dna_of(s).role == crate::sim::goods_dna::GoodRole::Treasure => TREASURE_VOLUME,
+        _ => 1.0,
+    }).collect();
     let abundance: Vec<f32> = (0..gc).map(|g| {
         let a = (raw_total[g] / raw_total_max).sqrt();
         // A FLOOR so a good that exists ANYWHERE stays visibly produced. The rescale
@@ -560,9 +571,10 @@ fn compute_economy_impl(
         // already carried this guard (0.6); non-deposit goods had none, which is the
         // root cause of the "tons of wine, no wineries" report. The floor only lifts a
         // good below it (a scarce one), leaving common goods' relative abundance intact.
-        if is_deposit[g] { a.max(0.6) }
+        let a = if is_deposit[g] { a.max(0.6) }
         else if raw_total[g] > 0.0 { a.max(NONDEPOSIT_ABUNDANCE_FLOOR) }
-        else { a }
+        else { a };
+        a * vol[g]
     }).collect();
     let good_max: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).fold(0.0f32, f32::max).max(1e-6)).collect();
 
@@ -645,7 +657,7 @@ fn compute_economy_impl(
             let belt_in_catchment = prod[hh][g] > 0.0;
             prod[hh][g] = prod[hh][g] / good_max[g] * abundance[g];
             if belt_in_catchment {
-                prod[hh][g] = prod[hh][g].max(CATCHMENT_MIN_PROD);
+                prod[hh][g] = prod[hh][g].max(CATCHMENT_MIN_PROD * vol[g]);
             }
         }
     }
@@ -656,7 +668,7 @@ fn compute_economy_impl(
     let mut monopoly = vec![0.0f32; nn];
     for hh in 0..nn {
         for g in 0..gc {
-            if good_total[g] < 1e-4 || prod[hh][g] < 0.05 { continue; }
+            if good_total[g] < 1e-4 || prod[hh][g] < 0.05 * vol[g] { continue; }
             let share = prod[hh][g] / good_total[g];
             monopoly[hh] += share * share;
         }
@@ -1209,7 +1221,7 @@ fn compute_economy_impl(
     // Monopolies: goods this hub is the dominant producer of (≥45% of world output).
     let monopolies_v: Vec<Vec<String>> = (0..nn).map(|hh| {
         let mut m: Vec<(f32, usize)> = (0..gc)
-            .filter(|&g| good_total[g] > 1e-4 && prod[hh][g] > 0.1
+            .filter(|&g| good_total[g] > 1e-4 && prod[hh][g] > 0.1 * vol[g]
                 && prod[hh][g] / good_total[g] >= 0.45)
             .map(|g| (prod[hh][g] / good_total[g], g)).collect();
         m.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -1227,7 +1239,7 @@ fn compute_economy_impl(
         // made amount), so `max` reports the right figure for both without branching.
         let reported = |g: usize| raw_prod[hh][g].max(prod[hh][g]);
         let mut produces: Vec<EconHubGood> = (0..gc)
-            .filter(|&g| reported(g) > 0.05)
+            .filter(|&g| reported(g) > 0.05 * vol[g])
             .map(|g| {
                 let q = quality[hh][g];
                 let id = goods_names.get(g).cloned().unwrap_or_default();
@@ -1261,7 +1273,7 @@ fn compute_economy_impl(
         let mut tv_best: (String, f32) = (String::new(), 0.0);
         let mut tv_total = 0.0f32;
         for g in 0..gc {
-            if prod[hh][g] > 0.05 {
+            if prod[hh][g] > 0.05 * vol[g] {
                 let v = prod[hh][g] * mkt.prices[hh][g].max(0.01);
                 tv_total += v;
                 if v > tv_best.1 {
@@ -1616,6 +1628,46 @@ mod economy_connectivity_tests {
         }
         buf.save(&conn, "test").unwrap();
         (WorldDb::new(conn), w)
+    }
+
+    /// Goods batch G2 — treasure is scarce in volume. Two towns on grain land, one
+    /// beside a rich gold working. Before G2 the best gold town made as many units as
+    /// the best grain town (every good normalised to its best producer, deposit
+    /// floor 0.6); gold must now be produced only where a real working is, and at a
+    /// small fraction of grain's volume, yet still read as a producer.
+    #[test]
+    fn treasure_is_scarce_in_volume_but_still_produced_where_mined() {
+        let (db, _w) = strait_world();
+        let conn = db.conn.lock().unwrap();
+        {
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            let wheat = crate::sim::biological::GOOD_WHEAT;
+            for y in 0..20 {
+                for x in 0..3000 {
+                    let i = buf.idx(x, y);
+                    buf.goods[wheat][i] = 200;
+                }
+            }
+            buf.save(&conn, "test").unwrap();
+        }
+        let gold = crate::sim::deposits::Deposit {
+            good: "gold".into(), x: 1002, y: 10, district: 0, grade: 0.9, extent: 3, depth: 0,
+            model: crate::sim::deposits::DepositModel::CollisionalOrogen,
+            working: crate::sim::deposits::WorkingKind::Open,
+        };
+        metadata::set_meta(&conn, "deposits", &serde_json::to_string(&vec![gold]).unwrap()).unwrap();
+        let json = r#"[
+            {"x":1000,"y":10,"score":100,"population":20000},
+            {"x":1500,"y":10,"score":99,"population":20000}
+        ]"#;
+        let snap = compute_economy_impl(&db, &conn, json, "", 0, 1.0, false, 2, 0.5, 0.0, -1, 12)
+            .expect("compute_economy_impl failed");
+        let amount = |h: usize, id: &str| snap.hubs[h].produces.iter()
+            .find(|p| p.good_name == id).map(|p| p.amount).unwrap_or(0.0);
+        let (gold_a, wheat_a) = (amount(0, "gold"), amount(0, "wheat"));
+        assert!(gold_a > 0.0, "the mining town must still read as a gold producer");
+        assert!(gold_a <= 0.1 * wheat_a, "gold {gold_a} must be a small fraction of grain {wheat_a}");
+        assert_eq!(amount(1, "gold"), 0.0, "a town with no working produces no gold");
     }
 
     /// The straight-line link ceiling in fine cells, so a fixture places its hubs

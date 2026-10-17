@@ -335,8 +335,55 @@ pub fn backfill_market_fields(specs: &mut [GoodSpec]) {
             }
         }
     }
+    // `cg()` below hardcoded base_value 1.0 for every declarative good, so silver,
+    // rubies and saffron all shipped worth exactly a unit of grain. For those ids an
+    // exact 1.0 was never chosen by anyone, so it is read as "unset" — on every load,
+    // which also repairs worlds and libraries saved before this fix.
+    for spec in specs.iter_mut() {
+        if spec.base_value == 1.0 {
+            if let Some(v) = custom_base_value(&spec.id) {
+                spec.base_value = v;
+            }
+        }
+        // Same repair for the category: gold and silver used to share "metal" with
+        // iron, so a city short of iron "substituted" gold.
+        if matches!(spec.id.as_str(), "gold" | "silver") && spec.category == "metal" {
+            spec.category = "bullion".into();
+        }
+    }
     // After the market fields, since the custom-good heuristic reads them.
     super::goods_dna::backfill_dna(specs);
+}
+
+/// World-standard value (grain = 1) of the shipped declarative goods built by
+/// `cg()`, which cannot carry one. Same scale as `GOOD_BASE_VALUE` (gold 50,
+/// gemstones 60, cloves 25). Silver at 5 sets the classic 1:10 gold:silver ratio.
+fn custom_base_value(id: &str) -> Option<f32> {
+    Some(match id {
+        "silver" => 5.0,
+        "ruby" | "sapphire" | "emerald" => 40.0,
+        "diamond" => 60.0,
+        "amethyst" | "topaz" => 10.0,
+        "jade" => 25.0,
+        "nutmeg" => 30.0,
+        "mace" => 35.0,
+        "saffron" => 40.0,
+        "cinnamon" => 20.0,
+        "tyrian_purple" => 45.0,
+        "ambergris" => 40.0,
+        "coral" => 12.0,
+        "camphor" => 20.0,
+        "benzoin" => 10.0,
+        "sandalwood" | "dragons_blood" => 15.0,
+        "citrus" => 2.0,
+        "flax" => 2.5,
+        "bay_salt" => 2.0,
+        "pitch" => 1.5,
+        "hemp" => 2.0,
+        "marble" => 3.0,
+        "lead" => 2.5,
+        _ => return None,
+    })
 }
 
 /// Categories for the shipped declarative (non-builtin) goods; unknown custom
@@ -351,7 +398,9 @@ fn custom_category(id: &str) -> &'static str {
         "ruby" | "sapphire" | "emerald" | "diamond" | "amethyst" | "topaz" => "gem",
         "cinnamon" | "saffron" => "aromatic",
         "tyrian_purple" => "dye",
-        "silver" | "lead" => "metal",
+        // Bullion substitutes only with bullion, never with a tool metal (plan §4.4).
+        "silver" => "bullion",
+        "lead" => "metal",
         "marble" => "construction",
         // Manufactured chain goods satisfy the same NEED as their finished form, so
         // they substitute against the matching raws in the market's needs ladder.

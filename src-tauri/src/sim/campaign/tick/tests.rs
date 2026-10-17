@@ -4,7 +4,7 @@
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
-            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN }
+            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN, volume: 1.0 }
     }
 
     pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -9369,6 +9369,20 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn a_treasure_estate_is_mined_at_treasure_volume() {
+        // Goods batch G2: the estate output floor is a rate for ordinary goods; a
+        // treasure good's floor is scaled by its volume, an ordinary good's is not.
+        let mut goods = vec![good("wheat", 0, 0, 1.0, 0.8, true), good("gold", 5, 2, 50.0, 0.6, false)];
+        goods[1].volume = 0.08;
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![100.0, 1.0], 0)], goods);
+        s.create_estate(0, 1.0, 1.0, 1, 2, -1, 12, false, false, 0, 500.0, 0.0);
+        s.create_estate(0, 1.0, 1.0, 0, 1, -1, 12, false, false, 0, 500.0, 0.0);
+        let n = s.hubs.len();
+        assert!((s.hubs[n - 2].base_per_capita[1] - 0.05 * 0.08).abs() < 1e-6, "gold estate at treasure volume");
+        assert!((s.hubs[n - 1].base_per_capita[0] - 0.05).abs() < 1e-6, "a farm keeps the ordinary floor");
+    }
+
     #[test]
     fn estate_kind_splits_mine_from_quarry() {
         // DIST_UNKNOWN — the pre-S4 substring cascade, unchanged.

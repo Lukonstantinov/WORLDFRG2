@@ -6,7 +6,7 @@ import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput,
 import { GoodIcon } from "./GoodIcon";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
-const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
+const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "bullion", "gem", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
 const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits", "manufactured"];
 const ROLES: GoodRole[] = ["staple", "essential", "strategic", "comfort", "luxury", "treasure"];
 const ORIGINS: GoodOrigin[] = ["grown", "raised", "gathered", "caught", "mined", "crafted"];
