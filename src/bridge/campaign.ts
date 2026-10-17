@@ -217,6 +217,11 @@ export async function campaignMarketCities(): Promise<import("@types").MarketCit
   return invoke("campaign_market_cities");
 }
 
+/** Cereal units one person eats a day — the anchor for metric goods units. */
+export async function campaignUnitScale(): Promise<{ grain_units_per_person_day: number }> {
+  return invoke("campaign_unit_scale");
+}
+
 /** All merchant families (active first, richest first). */
 export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");

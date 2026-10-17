@@ -9,6 +9,7 @@ import {
   type LabelKey, type LabelFontKey,
 } from "@canvas/OverlayManager";
 import { useUIStore } from "@state/uiStore";
+import { useUnits } from "@app/units";
 import { MAP_THEMES, applyMapTheme, themeReady } from "@ui/world/mapThemes";
 
 /** Top-screen Appearance settings: recolour every trade/connection overlay line.
@@ -131,6 +132,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           Restyle the map's lines and place names. Changes apply instantly, persist on
           this machine, and are saved with the world.
         </div>
+
+        {/* Units of measure (goods): metric is the standard, imperial an option. */}
+        <UnitsRow />
 
         {/* Section tabs */}
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
@@ -423,5 +427,20 @@ function SymbolSection({
         </div>
       ))}
     </>
+  );
+}
+
+/** Metric (standard) or imperial units for goods quantities, app-wide. */
+function UnitsRow() {
+  const { system, setSystem } = useUnits();
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, fontSize: 12, color: "#ac9c81" }}>
+      <span>Units</span>
+      {([["metric", "Metric (t, kg, L, m)"], ["imperial", "Imperial (tons, lb, gal, yd, troy oz)"]] as const).map(([id, lbl]) => (
+        <label key={id} style={{ display: "inline-flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
+          <input type="radio" name="units" checked={system === id} onChange={() => setSystem(id)} /> {lbl}
+        </label>
+      ))}
+    </div>
   );
 }

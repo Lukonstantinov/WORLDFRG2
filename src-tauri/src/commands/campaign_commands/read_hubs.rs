@@ -1075,3 +1075,27 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         line,
     }))
 }
+
+/// Goods units (owner 2026-10-17: metric standard) · the one physical anchor for the
+/// sim's abstract units: how many units of CEREAL one person eats a day. The UI sets
+/// that equal to ~0.6 kg of grain, which fixes kilograms per unit for every good.
+#[derive(serde::Serialize)]
+pub struct UnitScale {
+    /// 0 when there is no campaign (the UI then shows plain units).
+    pub grain_units_per_person_day: f32,
+}
+
+#[tauri::command]
+pub fn campaign_unit_scale(db: State<'_, WorldDb>) -> Result<UnitScale, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(UnitScale { grain_units_per_person_day: 0.0 }) };
+    // Category 0 is "cereal": campaign start reserves the four food categories first.
+    let cereals: Vec<usize> = (0..sim.goods.len()).filter(|&g| sim.goods[g].category == 0).collect();
+    let (mut need, mut pop) = (0.0f64, 0.0f64);
+    for (h, hub) in sim.hubs.iter().enumerate() {
+        if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
+        for &g in &cereals { need += sim.base_need(h, g) as f64; }
+        pop += hub.population as f64;
+    }
+    Ok(UnitScale { grain_units_per_person_day: if pop > 0.0 { (need / pop) as f32 } else { 0.0 } })
+}

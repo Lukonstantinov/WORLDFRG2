@@ -163,3 +163,13 @@ provinces have only a holder (city/house/crown), a tax rate, works and unrest.
   which changes who supplies what.
 Gates: `tick::tests` 417/417, `econ_` 6/6 (inheritance numbers unchanged), `goods_` 27/27,
 `manufacture` 7/7, new tests for strikes, families/naming and favourites; tsc; check_types.
+
+**Step 1g: metric units (2026-10-17, done; not seen in the app).** `campaign_unit_scale`
+reports how many cereal units one person eats a day; `src/units.ts` sets that equal to
+0.6 kg of grain and gives every good kilograms per unit from its value and value per
+weight (DNA tier: bulk ×1 … treasure ×20,000; gold 20,000×, silver 2,000×, so gold:silver
+by weight comes out 10:1). Quantities show in the unit people used: t / kg / g, litres
+and hectolitres for drink and oil, metres for cloth, head for horses; imperial = tons /
+lb, gallons, yards, troy ounces for treasure. Settings → Appearance has the Units
+switch (metric default). Shown first in the city market (made here, arrivals,
+departures); the rest of the panels still show model units — queued, panel by panel.

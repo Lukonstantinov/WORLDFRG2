@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { HubDetail, HubGoodDetail, ShipmentRow } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
 import { GoodIcon } from "@ui/goods/GoodIcon";
 import { MarketSquare } from "@ui/campaign/MarketSquare";
+import { useUnits, physicalQty, setUnitScale } from "@app/units";
+import { campaignUnitScale } from "@bridge";
+
+/** A good's quantity in metric/imperial units once the campaign anchor is known,
+ *  else the plain ×N the model counts in. */
+const fmtGood = (good: string, amount: number) =>
+  physicalQty(good, amount, useGoodsStore.getState().specs, useUnits.getState().system) ?? `×${fmt(amount)}`;
 
 /** ─────────────────────────────────────────────────────────────────────────────
  *  CITY MARKET — VARIANT C, "the quay" (`docs/TRADE_AND_MARKET_REVIEW.md` Part 3,
@@ -307,7 +314,7 @@ function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, la
                   fontSize: 8.5, paddingLeft: 12, color: C.inkMid }}>
                   <span style={{ width: 7, height: 7, borderRadius: 2, background: r.color, flex: "0 0 auto" }} />
                   <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {icon(r.good)} {label(r.good)} ×{fmt(r.amount)}
+                    {icon(r.good)} {label(r.good)} {fmtGood(r.good, r.amount)}
                   </span>
                   <span style={{ color: C.gold }}>{deal !== null ? deal.toFixed(2) : "\u2014"}</span>
                   {gap !== null && Math.abs(gap) > 0.02 && (
@@ -356,7 +363,7 @@ function DealRow({ s, side, icon, label }: {
         <span style={{ color: C.inkMid, maxWidth: 62, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.other}</span>
       </div>
       <div style={{ display: "flex", gap: 4, color: C.inkMid, paddingLeft: 12 }}>
-        <span style={{ color: C.ink }}>{icon(s.good)} ×{fmt(s.amount)}</span>
+        <span style={{ color: C.ink }}>{icon(s.good)} {fmtGood(s.good, s.amount)}</span>
         <span style={{ color: C.gold }}>{deal !== null ? `@ ${deal.toFixed(2)}` : "@ —"}</span>
         {gap !== null && Math.abs(gap) > 0.02 && (
           <span style={{ color: gap < 0 ? C.good : C.warn }}>
@@ -434,6 +441,13 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   // HOUSES_GUILDS_AND_MARKET_PLAN.md S4 — an earned craft signature ("Ypres
   // broadcloth") reads in place of the plain good name; quiet (the plain name)
   // wherever no guild here has earned one.
+  // Metric/imperial quantities: re-render on a units switch; fetch the anchor once.
+  useUnits((s) => s.system);
+  useGoodsStore((s) => s.specs);
+  const [, setScaleTick] = useState(0);
+  useEffect(() => {
+    campaignUnitScale().then((r) => { setUnitScale(r.grain_units_per_person_day); setScaleTick((t) => t + 1); }).catch(() => {});
+  }, [detail.id]);
   const goodLabel = (g: HubGoodDetail) => g.signature || (g.material ? `${g.material} ${label(g.name).toLowerCase()}` : label(g.name));
   const [sort, setSort] = useState<Sort>("odd");
   const [open, setOpen] = useState<string | null>(null);
@@ -586,7 +600,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
                 {m.damage > 0.05 && (
                   <span style={{ color: C.warn, fontSize: 8 }} title={`${Math.round(m.damage * 100)}% damaged`}>⚠</span>
                 )}
-                <span style={{ color: C.inkMid }}>{fmt(m.output)}</span>
+                <span style={{ color: C.inkMid }}>{fmtGood(m.good, m.output)}</span>
                 <span style={{ color: C.faint, fontSize: 8, maxWidth: 92, overflow: "hidden",
                   textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {m.source}{m.tier > 1 ? ` t${m.tier}` : ""}
