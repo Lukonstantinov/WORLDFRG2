@@ -202,6 +202,11 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                     crate::sim::tick::quality_grade(hub.quality.get(g).copied().unwrap_or(0.0)).to_string()
                 } else { String::new() },
                 signature: signature_by_good.get(&g).cloned().unwrap_or_default(),
+                material: hub.made_from.get(g).map(|t| {
+                    let ids: Vec<&str> = t.iter().filter(|&&i| i >= 0)
+                        .filter_map(|&i| sim.goods.get(i as usize).map(|tg| tg.name.as_str())).collect();
+                    crate::sim::goods_family::material_label(&ids)
+                }).unwrap_or_default(),
                 price_hist: price_hist[g].to_vec(),
                 vol_hist: vol_hist[g].to_vec(),
                 supply_shares: {

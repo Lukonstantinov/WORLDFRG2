@@ -789,7 +789,10 @@ impl CampaignSim {
     /// pass so the living economy and the static trade map agree. Manufactured
     /// goods are ordered raws-first so multi-stage chains resolve; cycles are
     /// skipped (a good that never reaches depth is left unmade).
-    pub(crate) fn manufacture_pass(&mut self) {
+    /// `ev` is today's per-(hub, good) event multiplier (`fill_event_production_mult`).
+    /// It used to be ignored here, so a guild strike — which writes exactly that
+    /// multiplier for a manufactured good — changed nothing.
+    pub(crate) fn manufacture_pass(&mut self, ev: &[Vec<f32>]) {
         let ng = self.goods.len();
         // Manufactured goods = those carrying a recipe.
         let recipe_goods: Vec<usize> = (0..ng).filter(|&g| !self.goods[g].inputs.is_empty()).collect();
@@ -851,11 +854,12 @@ impl CampaignSim {
         // metals/fibres never swap as structural inputs.
         let subs: std::collections::HashMap<usize, Vec<usize>> = {
             let mut m: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+            // Goods families: any member of the input's family will do (owner 2026-10-17).
             for g in 0..ng {
-                if !self.goods[g].fungible_input || self.goods[g].category == i32::MAX { continue; }
-                let cat = self.goods[g].category;
+                if self.goods[g].family.is_empty() { continue; }
+                let fam = &self.goods[g].family;
                 let sibs: Vec<usize> = (0..ng)
-                    .filter(|&j| j != g && self.goods[j].fungible_input && self.goods[j].category == cat)
+                    .filter(|&j| j != g && &self.goods[j].family == fam)
                     .collect();
                 if !sibs.is_empty() { m.insert(g, sibs); }
             }
@@ -918,7 +922,8 @@ impl CampaignSim {
                 // village press, it did not refine sugar it never received.
                 let is_entrepot_now = is_entrepot_candidate && import_dep >= ENTREPOT_IMPORT_DEP_FLOOR;
                 let entrepot_mult = if is_entrepot_now { 1.0 + ENTREPOT_MANUFACTURE_BONUS } else { 1.0 };
-                let made = by_inputs.min(labor_cap) * price_mult;
+                let event = ev.get(h).and_then(|r| r.get(g)).copied().unwrap_or(1.0);
+                let made = by_inputs.min(labor_cap) * price_mult * event;
                 if made <= 0.0 { continue; }
                 // 2.4 · chronicle the FIRST time this city becomes a refining
                 // entrepôt for this good — its own description changes, "lives by
@@ -938,10 +943,14 @@ impl CampaignSim {
                 if self.hubs[h].demand_accum.len() != ng * DEMAND_CLASSES {
                     self.hubs[h].demand_accum.resize(ng * DEMAND_CLASSES, 0.0);
                 }
+                // Which good actually supplied each input line, for the product's name.
+                let max_qty = inputs.iter().map(|&(_, q)| q).fold(0.0f32, f32::max);
+                let mut used: Vec<(usize, usize, f32)> = Vec::new(); // (recipe input, good used, qty)
                 for (idx, qty) in inputs {
                     if idx >= ng { continue; }
                     let mut need = made * qty / entrepot_mult;
                     let take = stock_of(&self.hubs[h].stock, idx).min(need);
+                    let mut best = (idx, take);
                     stock_take(&mut self.hubs[h].stock, idx, take);
                     demand_add(&mut self.hubs[h].demand_accum, idx, DEMAND_MANUFACTORY, take); // S6
                     need -= take;
@@ -950,13 +959,31 @@ impl CampaignSim {
                             for &s in sl {
                                 if need <= 0.0 { break; }
                                 let t = stock_of(&self.hubs[h].stock, s).min(need);
+                                if t > best.1 { best = (s, t); }
                                 stock_take(&mut self.hubs[h].stock, s, t);
                                 demand_add(&mut self.hubs[h].demand_accum, s, DEMAND_MANUFACTORY, t); // S6
                                 need -= t;
                             }
                         }
                     }
+                    // Minor inputs (under 30% of the main one) never name the product.
+                    if qty >= 0.3 * max_qty { used.push((idx, best.0, qty)); }
                 }
+                // Name: substituted materials first, then the main input, at most two.
+                // A product made exactly by its recipe keeps its plain name.
+                used.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                let mut tag = [-1i32; 2];
+                if used.iter().any(|u| u.0 != u.1) {
+                    let mut picks: Vec<(usize, f32)> = Vec::new();
+                    for u in used.iter().filter(|u| u.0 != u.1).chain(used.iter().take(1).filter(|u| u.0 == u.1)) {
+                        if picks.len() < 2 && !picks.iter().any(|p| p.0 == u.1) { picks.push((u.1, u.2)); }
+                    }
+                    // The lighter ornament leads, the bulk material follows: "Carnelian-gold".
+                    picks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    for (k, p) in picks.iter().enumerate() { tag[k] = p.0 as i32; }
+                }
+                if self.hubs[h].made_from.len() != ng { self.hubs[h].made_from = vec![[-1, -1]; ng]; }
+                self.hubs[h].made_from[g] = tag;
                 let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                 stock_add(&mut self.hubs[h].stock, g, band, made);
                 self.hubs[h].production[g] += made;
@@ -1277,7 +1304,7 @@ impl CampaignSim {
                         }
                     }
                 }
-                "overharvest" | "mine_flood" => {
+                "overharvest" | "mine_flood" | "lost_knowhow" => {
                     // Local: one hub's grounds stripped, or one hub's workings flooded.
                     if e.hub >= 0 && e.good >= 0 {
                         m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
@@ -1880,7 +1907,9 @@ impl CampaignSim {
                     let delivered = pa + self.good_freight(g, freight_rate * league_mult, days, sea);
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
-                    let room = (max_stock - stock_of(&self.hubs[b].stock, g)).max(0.0);
+                    // Cargo already on its way counts as stock — without it a city
+                    // short of a good drew shipment after shipment from every seller.
+                    let room = (max_stock - stock_of(&self.hubs[b].stock, g) - INBOUND_ROOM_DOSE * self.in_transit.inbound(b, g)).max(0.0);
                     let mut amount = surplus.min(room * 0.5);
                     if amount <= EPS {
                         continue;
@@ -2649,8 +2678,8 @@ impl CampaignSim {
     /// random stream (so every other event keeps its sequence): with
     /// `ORIGIN_FAILURE_MONTHLY_CHANCE`, one producing (hub, good) is struck, picked
     /// with weight difficulty², so hard goods fail far more than easy ones. The
-    /// output loss is floored like every event (`EVENT_PROD_FLOOR`). Crafted goods
-    /// are not struck here: manufacture does not read event multipliers (queued).
+    /// output loss is floored like every event (`EVENT_PROD_FLOOR`). A crafted good
+    /// loses its know-how: output halves for two years and the city's tradition drops.
     /// Goods with `ORIGIN_UNKNOWN` (old saves, every test fixture) never fail.
     pub(crate) fn roll_origin_failures(&mut self) {
         let tick = self.tick;
@@ -2660,7 +2689,7 @@ impl CampaignSim {
         for (h, hub) in self.hubs.iter().enumerate() {
             if hub.abandoned { continue; }
             for (g, tg) in self.goods.iter().enumerate() {
-                if tg.origin == ORIGIN_UNKNOWN || tg.origin == ORIGIN_CRAFTED || tg.difficulty == 0 { continue; }
+                if tg.origin == ORIGIN_UNKNOWN || tg.difficulty == 0 { continue; }
                 if hub.production.get(g).copied().unwrap_or(0.0) <= EPS { continue; }
                 if self.active_events.iter().any(|e| e.hub == h as i32 && e.good == g as i32) { continue; }
                 let w = (tg.difficulty as f32).powi(2);
@@ -2677,9 +2706,14 @@ impl CampaignSim {
             ORIGIN_RAISED => ("murrain", 0.4, 240),
             ORIGIN_GATHERED => ("overharvest", 0.6, 730),
             ORIGIN_CAUGHT => ("stock_collapse", 0.5, 365),
+            ORIGIN_CRAFTED => ("lost_knowhow", 0.5, 730),
             _ => ("mine_flood", 0.7, 365),
         };
         self.active_events.push(ActiveEvent { kind: kind.into(), hub: hub as i32, good: g as i32, magnitude: mag, until_tick: tick + days });
+        // Lost know-how also costs the city part of its accumulated craft tradition.
+        if kind == "lost_knowhow" {
+            if let Some(t) = self.hubs[hub].tradition.get_mut(g) { *t *= 0.6; }
+        }
         let city = self.hubs[hub].name.clone();
         let good = self.goods[g].name.replace('_', " ");
         let text = match kind {
@@ -2687,6 +2721,7 @@ impl CampaignSim {
             "murrain" => format!("Murrain sweeps the herds around {city}"),
             "overharvest" => format!("The {good} grounds of {city} are stripped bare and must recover"),
             "stock_collapse" => format!("The {good} shoals desert the waters off {city}"),
+            "lost_knowhow" => format!("The masters who knew how to make {good} at {city} are gone; the craft must be relearned"),
             _ => format!("The {good} workings at {city} flood"),
         };
         self.journal.push(JournalEntry { tick, kind: "failure".into(), hub: hub as i32, good: g as i32, value: mag, text });

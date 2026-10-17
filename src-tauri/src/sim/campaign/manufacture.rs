@@ -171,14 +171,14 @@ pub fn is_fungible_input_category(cat: &str) -> bool {
 /// that category that may substitute for it as a recipe input.
 fn fungible_substitutes(specs: &[GoodSpec]) -> HashMap<usize, Vec<usize>> {
     let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (g, spec) in specs.iter().enumerate() {
-        if spec.category.is_empty() || !is_fungible_input_category(&spec.category) {
-            continue;
-        }
+    // Goods families (owner 2026-10-17): any member of the input's family will do.
+    let fam: Vec<Option<String>> = specs.iter().map(crate::sim::goods_family::family_key).collect();
+    for (g, _spec) in specs.iter().enumerate() {
+        let Some(f) = fam[g].as_ref() else { continue };
         let sibs: Vec<usize> = specs
             .iter()
             .enumerate()
-            .filter(|(j, s)| *j != g && s.enabled && s.category == spec.category)
+            .filter(|(j, s)| *j != g && s.enabled && fam[*j].as_ref() == Some(f))
             .map(|(j, _)| j)
             .collect();
         if !sibs.is_empty() {

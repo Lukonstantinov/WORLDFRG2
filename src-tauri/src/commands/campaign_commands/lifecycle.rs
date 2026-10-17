@@ -400,6 +400,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                     crate::sim::goods_dna::GoodOrigin::Crafted => crate::sim::tick::ORIGIN_CRAFTED,
                 }).unwrap_or(crate::sim::tick::ORIGIN_UNKNOWN),
                 difficulty: spec.map(|s| crate::sim::goods_dna::dna_of(s).difficulty).unwrap_or(0),
+                family: spec.and_then(crate::sim::goods_family::family_key).unwrap_or_default(),
                 volume: match spec {
                     Some(s) if crate::sim::goods_dna::dna_of(s).role == crate::sim::goods_dna::GoodRole::Treasure => crate::sim::goods_dna::TREASURE_VOLUME,
                     _ => 1.0,
@@ -637,6 +638,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 has_mint: false,
                 quality: Vec::new(),
                 tradition: Vec::new(),
+                made_from: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
                 colony_kind: 0,

@@ -434,7 +434,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   // HOUSES_GUILDS_AND_MARKET_PLAN.md S4 — an earned craft signature ("Ypres
   // broadcloth") reads in place of the plain good name; quiet (the plain name)
   // wherever no guild here has earned one.
-  const goodLabel = (g: HubGoodDetail) => g.signature || label(g.name);
+  const goodLabel = (g: HubGoodDetail) => g.signature || (g.material ? `${g.material} ${label(g.name).toLowerCase()}` : label(g.name));
   const [sort, setSort] = useState<Sort>("odd");
   const [open, setOpen] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null); // filter deals to one good

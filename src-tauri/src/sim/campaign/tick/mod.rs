@@ -609,6 +609,14 @@ const CARAVAN_LEG_MAX_KM: f32 = 800.0;
 /// simply lands where it is and joins that hub's market pool — it is never
 /// deleted (losing cargo silently is how a conservation bug hides).
 pub(crate) const RELAY_MAX_HOPS: u8 = 6;
+/// Share of the cargo already on its way to a buyer that a seller counts as stock
+/// when sizing a shipment (the over-shipping fix). **A measured negative result at
+/// every dose tried** (2026-10-17): 1.0, 0.5 and even 0.25 broke 3-6 `tick::tests`
+/// (charter squeeze chokes, houses go broke, dense-world staging concentrates
+/// wealth) — the economy is calibrated around the over-shipping. Kept built at
+/// 0.0 (a true no-op) and queued with the province/logistics overhaul, which
+/// changes who supplies what.
+pub(crate) const INBOUND_ROOM_DOSE: f32 = 0.0;
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
 /// (`House.charters`, already granted to a POLITICAL house or a chartered guild
 /// that dominates its own seat, on its own specialty goods) today only earns the
@@ -3939,6 +3947,9 @@ pub struct TickGood {
     /// Goods batch G8 · difficulty 1-5 from the goods DNA (0 = unknown): harder
     /// goods fail more often.
     #[serde(default)] pub difficulty: u8,
+    /// Goods family (`goods_family::family_key`): any member may stand in for another
+    /// as a recipe input. Empty = none (old saves, test fixtures).
+    #[serde(default)] pub family: String,
 }
 
 pub(crate) const ORIGIN_UNKNOWN: u8 = 0;
@@ -4258,6 +4269,10 @@ pub struct TickHub {
     /// (2.2 · `maybe_poach_master`). Empty/zero on an old save — the honest
     /// reading is "no known tradition yet", not "as much as its size implies".
     #[serde(default)] pub tradition: Vec<f32>,
+    /// Per manufactured good, the up-to-two input goods it was last made from that
+    /// name it ("Carnelian-gold jewelry"); `[-1, -1]` = the plain recipe. Empty on
+    /// old saves.
+    #[serde(default)] pub made_from: Vec<[i32; 2]>,
     /// Espionage record (manufactories): good index whose technique was STOLEN into
     /// this hub (−1 none) and the hub id it was taken from (−1 none).
     #[serde(default = "neg_one_i32")] pub stolen_good: i32,
@@ -10782,7 +10797,8 @@ impl CampaignSim {
 
             // 1b) Manufacturing — cities transform imported raws into finished goods
             //     (wool→cloth, ore→arms), concentrated in big cities (labor ∝ pop).
-            self.manufacture_pass();
+            // Event effects (guild strikes, lost know-how, riots) reach the workshops too.
+            self.manufacture_pass(&prod_mult);
 
             // 2) Consumption with per-category substitution toward cheaper goods.
             // Reuse the `needs` buffer across ticks instead of reallocating an
@@ -11105,14 +11121,13 @@ impl CampaignSim {
                 // distance no single voyage covers is carried stop by stop for as
                 // many stages as the map requires, rather than being teleported the
                 // moment it has left its first port. `hops` bounds that walk
-                // (`RELAY_MAX_HOPS`); a cargo that exhausts it simply takes delivery
-                // where it stands instead of vanishing — cargo is never destroyed
-                // here, only re-addressed.
-                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len()
-                    && hops < RELAY_MAX_HOPS
-                {
+                // (`RELAY_MAX_HOPS`); a cargo that exhausts it sails its LAST leg
+                // straight to the buyer who paid for it. (It used to be unloaded
+                // where it stood — the buyer paid at dispatch and never received
+                // the goods, and a market nobody chose got them free.)
+                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len() {
                     let b = via as usize;
-                    let staged = if Self::leg_exceeds_range(
+                    let staged = if hops < RELAY_MAX_HOPS && Self::leg_exceeds_range(
                         self.hub_km(to, b),
                         self.hubs[to].coastal && self.hubs[b].coastal,
                         self.ship_leg_max_km, self.caravan_leg_max_km,

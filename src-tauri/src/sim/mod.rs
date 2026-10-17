@@ -48,6 +48,7 @@ pub use step8_biological_goods::biological;
 pub use step8_biological_goods::deposits;
 pub use step8_biological_goods::goods_spec;
 pub use step8_biological_goods::goods_dna;
+pub use step8_biological_goods::goods_family;
 pub use step8_biological_goods::localities;
 
 // ── Campaign Simulation ──────────────────────────────────────────────────────

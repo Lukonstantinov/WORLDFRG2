@@ -16,7 +16,7 @@
 
 use super::InTransit;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Busy vessels per house: `[sea, land]` for ALL owned cargo (what
 /// `fulfill_contracts` and `decide_fleets` count) and for owned NON-contract
@@ -30,6 +30,9 @@ pub struct TransitBook {
     by_day: BTreeMap<u32, Vec<InTransit>>,
     len: usize,
     busy: Vec<Busy>,
+    /// Cargo on its way to each (final buyer, good) — what a seller must count as
+    /// already coming before it ships more. f64 so the running sum does not drift.
+    inbound: HashMap<(u32, u32), f64>,
 }
 
 impl TransitBook {
@@ -46,6 +49,12 @@ impl TransitBook {
         self.by_day.clear();
         self.len = 0;
         self.busy.clear();
+        self.inbound.clear();
+    }
+
+    /// Amount of `good` already on its way to `buyer` (its final market).
+    pub fn inbound(&self, buyer: usize, good: usize) -> f32 {
+        self.inbound.get(&(buyer as u32, good as u32)).copied().unwrap_or(0.0).max(0.0) as f32
     }
 
     /// Every cargo due on or before `tick`, in landing order, removed from the book.
@@ -66,6 +75,11 @@ impl TransitBook {
     pub fn iter(&self) -> impl Iterator<Item = &InTransit> { self.by_day.values().flatten() }
 
     fn count(&mut self, c: &InTransit, d: i32) {
+        // A relayed cargo's final buyer is `via`; a direct one's is `to`.
+        let buyer = if c.via >= 0 { c.via as u32 } else { c.to };
+        let e = self.inbound.entry((buyer, c.good as u32)).or_insert(0.0);
+        *e += d as f64 * c.amount as f64;
+        if *e <= 1e-6 { self.inbound.remove(&(buyer, c.good as u32)); }
         if c.owner < 0 { return; }
         let oi = c.owner as usize;
         if self.busy.len() <= oi { self.busy.resize(oi + 1, Busy::default()); }

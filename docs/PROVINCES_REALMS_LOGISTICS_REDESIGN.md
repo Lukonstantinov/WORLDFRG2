@@ -135,3 +135,31 @@ provinces have only a holder (city/house/crown), a tax rate, works and unrest.
 | Cities in a realm | **Always their own council**; they pay the crown taxes/fees and send a delegate to the royal council |
 | Royal council | **Houses, notables and cities**: offices to the ruler's kin, powerful houses and famous notables; large cities send a delegate; each member has character and stance (as the city council chamber) |
 | Governors | **Skim taxes** (shown in the accounts), **rebel or break away** (a disloyal governor of a distant restless province founds a one-province realm), **be replaced** (by the holder automatically, or by the author in the world builder) |
+
+## 9. Implementation progress
+**Step 1a-1d (2026-10-17, done):**
+- **Strikes work:** `manufacture_pass` now reads the day's event multiplier, so a guild
+  strike halves output (it changed nothing before). Crafted goods can **lose their
+  know-how** (`roll_origin_failures`): output halves for two years and the city's craft
+  tradition drops 40%.
+- **Goods families** (`step8_biological_goods/goods_family.rs`): wool (fleece, llama),
+  plant fibre, dye, gem, bullion, spice, incense, salt, iron, timber, fish. A recipe
+  takes ANY member of its input's family (both the year-0 economy and the campaign), and
+  the product is named after what it was made from: `TickHub.made_from` →
+  `HubGoodDetail.material` → the city market reads "Carnelian-gold jewelry",
+  "Llama-wool carpets". Minor inputs (<30% of the main one) never name the product; the
+  lighter ornament leads. **Indigo is switched back on** as the everyday plant dye — with
+  `dyes` retired, no dye existed and cloth, carpets, brocade and books were never made.
+- **Favourite member:** a people whose taste names a generic good ("spices",
+  "gemstones", "dyes") craves its own favourite member instead, chosen stably per people
+  (`culture_values::favourite`).
+- **Cargo bug 1 fixed:** a relayed cargo that runs out of stops sails its last leg to the
+  buyer who paid, instead of being unloaded in a town nobody chose.
+- **Cargo bug 2 — measured negative result:** counting cargo already on its way as stock
+  (`INBOUND_ROOM_DOSE`) broke `tick::tests` at 1.0 (6 failures), 0.5 (5) and 0.25 (3):
+  the charter squeeze chokes, houses go broke, dense-world staging concentrates wealth.
+  The economy is calibrated around the over-shipping. Built (the arrival calendar now
+  keeps a running inbound tally) and shipped at 0.0; queued with the province economy,
+  which changes who supplies what.
+Gates: `tick::tests` 417/417, `econ_` 6/6 (inheritance numbers unchanged), `goods_` 27/27,
+`manufacture` 7/7, new tests for strikes, families/naming and favourites; tsc; check_types.

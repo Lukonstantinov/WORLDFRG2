@@ -492,7 +492,10 @@ pub fn default_list() -> Vec<GoodSpec> {
                 //     EXCEPTION, so retiring it removes that exception too.
                 enabled: !matches!(
                     g,
-                    GOOD_TOBACCO | GOOD_FRANKINCENSE | GOOD_INDIGO | GOOD_GEMSTONES | GOOD_DYES
+                    // Indigo is switched back ON (2026-10-17): it is the everyday plant
+                    // dye, and with `dyes` retired no dye was made at all, so every
+                    // recipe needing dye (cloth, carpets, brocade, books) made nothing.
+                    GOOD_TOBACCO | GOOD_FRANKINCENSE | GOOD_GEMSTONES | GOOD_DYES
                 ),
                 domain,
                 distribution,

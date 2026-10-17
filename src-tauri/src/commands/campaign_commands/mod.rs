@@ -469,6 +469,9 @@ pub struct HubGoodDetail {
     /// case (no guild here, or one that hasn't earned a name yet); the frontend
     /// reads the plain good name in that case, quiet when there is nothing to say.
     #[serde(default)] pub signature: String,
+    /// Goods families · the materials this city last made the good from, as a name
+    /// prefix ("Carnelian-gold" → "Carnelian-gold jewelry"). Empty = the plain recipe.
+    #[serde(default)] pub material: String,
     /// The PERSISTED yearly price series for this (hub, good) — `TradeHist.prices`,
     /// grain-equivalent, most recent last. Empty for a good this hub has never
     /// traded (no `TradeHist` row exists), and short in the years right after a

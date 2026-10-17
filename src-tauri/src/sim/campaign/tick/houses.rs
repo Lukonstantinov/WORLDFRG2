@@ -646,6 +646,7 @@ impl CampaignSim {
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
             tradition: vec![0.0f32; ng],
+            made_from: Vec::new(),
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: 0,

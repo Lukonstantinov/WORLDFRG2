@@ -4,7 +4,7 @@
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
-            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN, volume: 1.0, origin: ORIGIN_UNKNOWN, difficulty: 0 }
+            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN, volume: 1.0, origin: ORIGIN_UNKNOWN, difficulty: 0, family: String::new() }
     }
 
     pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -25,7 +25,7 @@
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
-            quality: Vec::new(), tradition: Vec::new(), stolen_good: -1, stolen_from: -1,
+            quality: Vec::new(), tradition: Vec::new(), made_from: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
@@ -9370,6 +9370,42 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn a_recipe_uses_any_family_member_and_names_the_product_after_it() {
+        // Jewelry asks for gold, silver and "gemstones". The city has only gold and
+        // carnelian: gold stands in for silver, carnelian for the gems, and the
+        // product is "Carnelian-gold jewelry".
+        let mut goods = vec![good("gold", 5, 2, 50.0, 0.6, false), good("silver", 5, 2, 5.0, 0.6, false),
+            good("gemstones", 6, 2, 60.0, 0.5, false), good("carnelian", 6, 2, 5.0, 0.5, false), good("jewelry", 7, 2, 45.0, 0.5, false)];
+        for (g, f) in [(0, "bullion"), (1, "bullion"), (2, "gem"), (3, "gem")] { goods[g].family = f.into(); }
+        goods[4].inputs = vec![(0, 0.3), (1, 0.3), (2, 0.1)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0; 5], 0)], goods);
+        stock_add(&mut s.hubs[0].stock, 0, 0, 1_000.0);
+        stock_add(&mut s.hubs[0].stock, 3, 0, 1_000.0);
+        s.manufacture_pass(&[vec![1.0; 5]]);
+        assert!(s.hubs[0].production[4] > 0.0, "jewelry is made from what the city has");
+        let ids: Vec<&str> = s.hubs[0].made_from[4].iter().filter(|&&i| i >= 0).map(|&i| s.goods[i as usize].name.as_str()).collect();
+        assert_eq!(crate::sim::goods_family::material_label(&ids), "Carnelian-gold");
+    }
+
+    #[test]
+    fn a_guild_strike_really_slows_the_workshops() {
+        // Before, manufacture ignored event multipliers, so a strike changed nothing.
+        let mut goods = vec![good("wool", 0, 1, 2.0, 0.5, false), good("cloth", 1, 1, 8.0, 0.5, false)];
+        goods[1].inputs = vec![(0, 1.0)];
+        let make = |strike: bool| {
+            let mut s = sim(vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0, 0.0], 0)], goods.clone());
+            stock_add(&mut s.hubs[0].stock, 0, 0, 10_000.0);
+            let mut ev = vec![vec![1.0f32; 2]];
+            if strike { ev[0][1] = 0.5; }
+            s.manufacture_pass(&ev);
+            s.hubs[0].production[1]
+        };
+        let (open, struck) = (make(false), make(true));
+        assert!(open > 0.0, "the workshop makes cloth");
+        assert!((struck - open * 0.5).abs() < open * 0.01, "a strike halves it ({struck} vs {open})");
+    }
+
     #[test]
     fn goods_fail_the_way_their_origin_does_and_hard_ones_fail_more() {
         // Goods batch G8. Two cities: one grows an easy crop (difficulty 1) and mines a

@@ -67,7 +67,7 @@ pub fn auto_values(culture: &str, tastes: &[&str], traits: &[usize], goods: &[&s
             out.push(CultureValue { culture: culture.to_string(), good: good.to_string(), kind });
         }
     };
-    for t in tastes { push(t, ValueKind::Prestige); }
+    for t in tastes { push(&favourite(culture, t, goods), ValueKind::Prestige); }
     if traits.contains(&DEVOUT) {
         if let Some(g) = ["incense", "frankincense", "candles"].into_iter().find(|g| has(g)) { push(g, ValueKind::Sacred); }
     }
@@ -75,6 +75,26 @@ pub fn auto_values(culture: &str, tastes: &[&str], traits: &[usize], goods: &[&s
     if traits.contains(&PASTORAL) { push("hides", ValueKind::Staple); }
     if traits.contains(&MERCANTILE) { push("silver", ValueKind::Currency); }
     out
+}
+
+/// Generic goods that stand for a whole family. A people never craves "spices" in
+/// general: it craves its own favourite spice.
+const GENERIC: [&str; 3] = ["spices", "gemstones", "dyes"];
+
+/// A people's favourite member of a taste's family (owner 2026-10-17: "spices" →
+/// nutmeg for one people, pepper for another). A specific good stays itself; a
+/// generic one resolves to one specific member present on this world, chosen by a
+/// stable hash of the people and the family, so a people keeps its favourite.
+pub fn favourite(culture: &str, taste: &str, goods: &[&str]) -> String {
+    if !GENERIC.contains(&taste) { return taste.to_string(); }
+    let Some(fam) = crate::sim::goods_family::family_of(taste) else { return taste.to_string() };
+    let mut members: Vec<&str> = goods.iter().copied()
+        .filter(|g| !GENERIC.contains(g) && crate::sim::goods_family::family_of(g) == Some(fam)).collect();
+    if members.is_empty() { return taste.to_string(); }
+    members.sort_unstable();
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in culture.bytes().chain(fam.bytes()) { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
+    members[(h % members.len() as u64) as usize].to_string()
 }
 
 /// The profile in force for `culture`: the author's entries if any were set for it,
@@ -102,5 +122,14 @@ mod culture_values_tests {
         let p = profile("Vexillia", &custom, || auto.clone());
         assert_eq!(p, custom, "an author's entries replace the derived profile");
         assert_eq!(profile("Other", &custom, Vec::new).len(), 0);
+        // A generic taste becomes this people's own favourite member, stably.
+        let world = ["spices", "pepper", "nutmeg", "cloves"];
+        let fav = favourite("Vexillia", "spices", &world);
+        assert!(["pepper", "nutmeg", "cloves"].contains(&fav.as_str()));
+        assert_eq!(fav, favourite("Vexillia", "spices", &world));
+        assert_eq!(favourite("Vexillia", "wine", &world), "wine");
+        let peoples = ["Aiora", "Belgar", "Corran", "Dunmar", "Esk", "Fal"];
+        let picks: std::collections::HashSet<String> = peoples.iter().map(|p| favourite(p, "spices", &world)).collect();
+        assert!(picks.len() > 1, "different peoples favour different spices");
     }
 }

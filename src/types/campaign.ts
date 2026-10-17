@@ -320,6 +320,8 @@ export interface HubGoodDetail {
    *  hub for this good ("Ypres broadcloth"), once one exists. Empty otherwise;
    *  render the plain good name in that case. */
   signature?: string;
+  /** Goods families · materials it was made from ("Carnelian-gold"); empty = plain recipe. */
+  material?: string;
   /** PERSISTED yearly price series for this (hub, good), grain-eq, most recent
    *  last (`TradeHist.prices`). Empty for a good this hub has never traded. */
   price_hist?: number[];
