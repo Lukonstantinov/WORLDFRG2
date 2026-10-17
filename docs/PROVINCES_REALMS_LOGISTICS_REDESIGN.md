@@ -110,3 +110,28 @@ defects to fix in passing: realm minimap is a blurry fixed canvas, goods icons d
 5. Regions without gold/silver use alternative money — iterate on the historical ladder (§4).
 6. The world map shows all goods; in a campaign some become tinted (unexploited) and the
    exploited ones stay clear.
+
+## 8. Mock-up 1 review and government decisions (2026-10-17)
+Owner: the one-window mock-up "looks good", implement that view; re-check its logic.
+**Logic fixes found on re-check (apply in the real build):** (1) country→market arrows must
+go to the province's own market town(s), then the 1-2 nearest towns — the mock sent them
+to the neighbouring province with most townsfolk, even across a realm frontier; (2) the
+Goods tab's consumption must be real use by the realm's people, not constants; (3) taking
+a realm's capital province away must pick a new capital or be refused; (4) realm power
+uses live cohesion; (5) economy index is computed, never a fixed number.
+
+**What government exists today:** cities have the full Living World government (form,
+seats/officials, debates, edicts, ideology meters); realms have ruler/heir/regent/family,
+legitimacy, cohesion, autonomy, rank, ruling house, vassals — no council, offices or laws;
+provinces have only a holder (city/house/crown), a tax rate, works and unrest.
+
+| Topic | Decision |
+|---|---|
+| Realm government | **Crown + royal council**: ruler, heir, regent, 3-5 great offices (chancellor, treasurer, marshal, steward…) filled from houses and notables; realm laws (tax level, levies, succession law, trade policy); driven by legitimacy, cohesion, autonomy |
+| Province government | **Governor** appointed by the holder (crown, house or city); loyalty and honesty; sets tax, levy and works; can skim or rebel |
+| Control | **Set when building the world**: the author makes the map and decides countries and their government types. **At campaign start: continue as authored, randomise, or clear to nothing** so the whole history is simulated from zero |
+| Layout | **Same window**, Realm › Province › City breadcrumb, a Government tab at each level |
+| Realm laws | **All four**: taxes & levies; succession law; trade policy (open / tolls / staple rights / embargo); towns & cultures — since cities always keep their own council, "towns" means TOWN PRIVILEGES (the fee and tax share a city pays the crown), plus minority tolerance |
+| Cities in a realm | **Always their own council**; they pay the crown taxes/fees and send a delegate to the royal council |
+| Royal council | **Houses, notables and cities**: offices to the ruler's kin, powerful houses and famous notables; large cities send a delegate; each member has character and stance (as the city council chamber) |
+| Governors | **Skim taxes** (shown in the accounts), **rebel or break away** (a disloyal governor of a distant restless province founds a one-province realm), **be replaced** (by the holder automatically, or by the author in the world builder) |

@@ -97,7 +97,10 @@ canvas.gi { width: 24px; height: 24px; image-rendering: pixelated; }
 <p class="note"><b>Mock-up, example data.</b> One window for a realm and its provinces. The map on the left is generated with the
 proposed border method (borders wander instead of running straight; small provinces in rich land, large ones in poor).
 Try the map toggles, hover and click provinces (click drills into the province here, in the same window), the Goods tab
-(click a good), and Edit realms (recolour, assign provinces, new realm, regenerate with random sizes).</p>
+(click a good), and Edit realms (recolour, assign provinces, new realm, regenerate with random sizes).
+<b>New in v2:</b> Government tabs at every level — the realm (crown, royal council, laws), a province (its governor, what he
+keeps, the risk he breaks away) and a city (click a province, then its town: the city's own council) — and the campaign-start
+choice in Edit realms.</p>
 
 <div class="win">
   <div class="head">
@@ -223,6 +226,15 @@ for (const P of provs) {
   P.order = 1 + ((R2() * 4) | 0);
   P.cult = r > 0.6 ? 0 : h > 0.7 ? 2 : c < 4 ? 3 : (R2() < 0.6 ? 0 : 1);
   P.town = P.name.slice(0, 4) + ["ford","wick","burg","haven","stead"][(R2() * 5) | 0];
+  P.gov = { name: ["Aldric","Merel","Oswin","Tamsin","Brannoc","Ysolde","Corwen","Hilde"][(R2() * 8) | 0] + " " + ["of " + P.name, "Varr", "Dunmere", "Ostley"][(R2() * 4) | 0],
+            loyalty: Math.round(30 + R2() * 70), honesty: Math.round(25 + R2() * 75), years: 1 + ((R2() * 14) | 0) };
+  P.council = { form: P.urban > 9000 ? "Great Council" : P.urban > 3000 ? "Town Council" : "Village Assembly", seats: P.urban > 9000 ? 9 : P.urban > 3000 ? 7 : 5 };
+}
+// A province's market town sits on its richest land near the middle, not at the centroid.
+for (const P of provs) {
+  let best = -1, bi = -1;
+  for (let i = 0; i < N; i++) { if (owner[i] !== P.id) continue; const x = i % GW, y = (i / GW) | 0, d = (x - P.cx) ** 2 + (y - P.cy) ** 2; if (d > 40) continue; const sc = rich[i] - d * 0.004; if (sc > best) { best = sc; bi = i; } }
+  P.tx = bi >= 0 ? bi % GW : P.cx; P.ty = bi >= 0 ? (bi / GW) | 0 : P.cy;
 }
 // Realms: random sizes (1 province … many), grown over the province graph.
 const PALETTE = ["#b0473a","#3f6fa8","#c99a3a","#4f8a5a","#8a4fa0","#2f8f8a","#a8603a","#6a7d2f","#b04a7a","#4a5aa0","#9a8a3a","#3a7a5a","#c06a50","#5a4a8a","#7a9a4a","#a83a5a"];
@@ -238,7 +250,10 @@ function makeRealms(s) {
       for (const nb of provs[ids[k]].nb) if (free.has(nb) && ids.length < target && r() < 0.8) { free.delete(nb); ids.push(nb); }
     const nm = provs[start].name;
     const kind = ids.length === 1 ? "Free City of " : ids.length < 4 ? "County of " : ids.length < 8 ? "Duchy of " : "Kingdom of ";
-    realms.push({ name: kind + nm, color: PALETTE[realms.length % PALETTE.length], provs: ids, capital: start });
+    realms.push({ name: kind + nm, color: PALETTE[realms.length % PALETTE.length], provs: ids, capital: start,
+      cohesion: 0.4 + r() * 0.5, legitimacy: 0.45 + r() * 0.5,
+      laws: { tax: 1 + ((r() * 3) | 0), levy: 1 + ((r() * 3) | 0), succession: ["Primogeniture","Elective","Partible","Seniority"][(r() * 4) | 0],
+              trade: ["Open markets","River tolls","Staple right","Embargo on rivals"][(r() * 4) | 0], townFee: 1 + ((r() * 3) | 0), tolerance: ["Welcomed","Tolerated","Restricted"][(r() * 3) | 0] } });
   }
   realms.sort((a, b) => b.provs.length - a.provs.length);
   realms.forEach((rl, k) => rl.color = PALETTE[k % PALETTE.length]);
@@ -248,7 +263,16 @@ makeRealms(5);
 const realmOf = p => realms.findIndex(r => r.provs.includes(p));
 
 // ── state ───────────────────────────────────────────────────────────────────
-const st = { tab: "overview", prov: null, hover: null, fill: "realm", focusGood: null, assign: false, editRealm: 0, pal: null, sort: "rural", dir: -1 };
+const st = { tab: "overview", prov: null, city: false, hover: null, fill: "realm", focusGood: null, assign: false, editRealm: 0, pal: null, sort: "rural", dir: -1, start: "continue" };
+// The royal council: the ruler's kin, great houses, famous notables, and delegates of the largest cities.
+const COUNCIL = [
+  { office: "Ruler", who: "King Odric II", from: "House Valcour", stance: "Crown first", tone: "#e0b85c" },
+  { office: "Chancellor", who: "Lady Merel Valcour", from: "the king's sister", stance: "Keeps the peace with neighbours", tone: "#c9b48a" },
+  { office: "Treasurer", who: "Bertil Ostmark", from: "House Ostmark (merchants)", stance: "Lower tolls, more trade", tone: "#7cc48a" },
+  { office: "Marshal", who: "Sir Corwen Dale", from: "House Dale", stance: "Raise the levies", tone: "#d86a5a" },
+  { office: "Steward", who: "Abbess Hilde", from: "notable · scholar", stance: "Roads and granaries", tone: "#8fb0d8" },
+  { office: "City delegate", who: "Mayor of Arvenne", from: "Arvenne's Great Council", stance: "Keep the town fee low", tone: "#c99a3a" },
+];
 const $ = id => document.getElementById(id);
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
 const GOOD_COLOR = { wheat:"#d9b94a", barley:"#c8a85a", wool_fleece:"#e8e3d8", horses:"#b5793a", hides:"#9a7a50", honey:"#e0a020", beer:"#d09030", wine:"#9b2d4f", oliveoil:"#8ea33a", citrus:"#f4a33a", iron:"#9aa0a6", copper:"#b06a3a", silver:"#c8ccd6", tin:"#b8bcc0", marble:"#e8e6e0", gold:"#d4af37", stockfish:"#6fb0c8", herring:"#7ab8d0", salt:"#cfd6dc", timber:"#6b8f4e", furs:"#a9763d", amber:"#e0962a", pitch:"#3b2f2a" };
@@ -307,12 +331,21 @@ function draw() {
   const visible = provs.filter(P => P.cx > x0 && P.cx < x0 + cv.width / s && P.cy > y0 && P.cy < y0 + cv.height / s);
   const mineSet = st.prov !== null ? [st.prov] : realms[myRealm].provs;
   // Country → market: each province's rural population sends its surplus to its market town.
-  if ($("mTrade").checked) for (const P of visible.filter(P => mineSet.includes(P.id))) {
-    const [ax, ay] = P2S(P); const T = provs[realms[myRealm].capital]; const tgt = P.nb.size && P.id !== T.id ? [...P.nb].map(q => provs[q]).sort((a, b) => b.urban - a.urban)[0] : null;
-    if (!tgt) continue; const [bx, by] = P2S(tgt);
-    const g = P.goods[0]; ctx.strokeStyle = GOOD_COLOR[g] || "#ddd"; ctx.lineWidth = 2 + Math.min(6, P.gamt[0] / 900); ctx.globalAlpha = 0.85;
+  // The countryside sells first to its OWN market town, then a little to the nearest
+  // town of a neighbouring province in the same realm (never across a frontier).
+  const T2S = P => [(P.tx - x0 + 0.5) * s, (P.ty - y0 + 0.5) * s];
+  const arrow = (ax, ay, bx, by, color, w) => {
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.globalAlpha = 0.85;
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo((ax + bx) / 2 + (by - ay) * 0.15, (ay + by) / 2 - (bx - ax) * 0.15, bx, by); ctx.stroke(); ctx.globalAlpha = 1;
-    const ang = Math.atan2(by - ay, bx - ax); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 12 * Math.cos(ang - 0.4), by - 12 * Math.sin(ang - 0.4)); ctx.lineTo(bx - 12 * Math.cos(ang + 0.4), by - 12 * Math.sin(ang + 0.4)); ctx.fill();
+    const ang = Math.atan2(by - ay, bx - ax); ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 11 * Math.cos(ang - 0.4), by - 11 * Math.sin(ang - 0.4)); ctx.lineTo(bx - 11 * Math.cos(ang + 0.4), by - 11 * Math.sin(ang + 0.4)); ctx.fill();
+  };
+  if ($("mTrade").checked) for (const P of visible.filter(P => mineSet.includes(P.id))) {
+    const rx = (P.cx - x0 + 0.5) * s + 18, ry = (P.cy - y0 + 0.5) * s + 34;   // the countryside
+    const [tx, ty] = T2S(P);
+    arrow(rx, ry, tx, ty, GOOD_COLOR[P.goods[0]] || "#ddd", 2 + Math.min(6, P.gamt[0] / 900));
+    const near = [...P.nb].map(q => provs[q]).filter(Q => realmOf(Q.id) === realmOf(P.id))
+      .map(Q => ({ Q, d: (Q.tx - P.cx) ** 2 + (Q.ty - P.cy) ** 2 })).sort((a, b) => a.d - b.d)[0];
+    if (near && near.d < 30 * 30 && P.goods[1]) { const [nx, ny] = T2S(near.Q); arrow(rx, ry, nx, ny, GOOD_COLOR[P.goods[1]] || "#ddd", 1.5); }
   }
   // Labels, goods, cities.
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -333,7 +366,9 @@ function draw() {
       });
     }
     if ($("mCities").checked && mine) {
-      const cap = realms[myRealm].capital === P.id; ctx.fillStyle = "#14110d"; ctx.beginPath(); ctx.arc(px, py - 12, cap ? 7 : 4.5, 0, 7); ctx.fill(); ctx.fillStyle = cap ? "#e0b85c" : "#ecdcb5"; ctx.beginPath(); ctx.arc(px, py - 12, cap ? 5 : 3, 0, 7); ctx.fill();
+      const cap = realms[myRealm].capital === P.id, [cx2, cy2] = T2S(P), big = st.prov === P.id ? 1.6 : 1;
+      ctx.fillStyle = "#14110d"; ctx.beginPath(); ctx.arc(cx2, cy2, (cap ? 7 : 4.5) * big, 0, 7); ctx.fill();
+      ctx.fillStyle = cap ? "#e0b85c" : "#ecdcb5"; ctx.beginPath(); ctx.arc(cx2, cy2, (cap ? 5 : 3) * big, 0, 7); ctx.fill();
     }
     ctx.font = (mine ? "600 " : "") + (st.prov !== null && P.id === st.prov ? 20 : 13) + "px " + getComputedStyle(document.documentElement).getPropertyValue("--font-body");
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,8,5,.75)"; ctx.fillStyle = mine ? "#f5efe2" : "#b8ad96";
@@ -363,8 +398,21 @@ cv.addEventListener("mousemove", e => { const p = provAt(e); if (p !== st.hover)
 cv.addEventListener("mouseleave", () => { st.hover = null; draw(); });
 cv.addEventListener("click", e => {
   const p = provAt(e); if (p === null) return;
-  if (st.assign) { realms.forEach(r => r.provs = r.provs.filter(q => q !== p)); realms[st.editRealm].provs.push(p); realms = realms.filter(r => r.provs.length); render(); return; }
-  if (realmOf(p) === myRealm) { st.prov = p; st.tab = "province"; render(); }
+  if (st.assign) {
+    // Taking a realm's capital province away moves its capital to its largest remaining town.
+    const target = realms[st.editRealm];
+    realms.forEach(r => { r.provs = r.provs.filter(q => q !== p); if (r.capital === p && r !== target) r.capital = r.provs.slice().sort((a, b) => provs[b].urban - provs[a].urban)[0] ?? -1; });
+    target.provs.push(p); if (target.capital < 0) target.capital = p;
+    const keep = realms[myRealm]; realms = realms.filter(r => r.provs.length); myRealm = Math.max(0, realms.indexOf(keep)); st.editRealm = Math.max(0, realms.indexOf(target));
+    render(); return;
+  }
+  if (st.prov === p) {
+    // Clicking the province's own town opens its city government.
+    const r = cv.getBoundingClientRect(), sx = (e.clientX - r.left) * cv.width / r.width, sy = (e.clientY - r.top) * cv.height / r.height;
+    const P = provs[p], tx = (P.tx - view.x0 + 0.5) * view.s, ty = (P.ty - view.y0 + 0.5) * view.s;
+    if ((sx - tx) ** 2 + (sy - ty) ** 2 < 22 * 22) { st.city = true; st.tab = "city"; render(); return; }
+  }
+  if (realmOf(p) === myRealm) { st.prov = p; st.city = false; st.tab = "province"; render(); }
 });
 document.querySelectorAll('input[name=fill]').forEach(r => r.onchange = () => { st.fill = r.value; draw(); });
 ["mBorders", "mGoods", "mCities", "mTrade", "mCampaign"].forEach(id => $(id).onchange = () => { draw(); if (st.tab === "province") pane(); });
@@ -375,31 +423,47 @@ function header() {
   const rural = ps.reduce((a, P) => a + P.rural, 0), urban = ps.reduce((a, P) => a + P.urban, 0), tax = ps.reduce((a, P) => a + P.tax, 0);
   $("swatch").style.background = R0.color; $("title").textContent = R0.name;
   $("rank").textContent = ps.length === 1 ? "Free city" : ps.length < 4 ? "County" : ps.length < 8 ? "Duchy" : "Kingdom";
-  const power = Math.round((rural + urban) / 1000 * 0.72 * (1 + tax / 400));
+  // Realm power = population × cohesion × (treasury + revenue), on a readable scale.
+  const treasury = 25450, revenue = tax * 12;
+  const power = Math.round((rural + urban) / 1000 * R0.cohesion * (1 + (treasury + revenue) / 40000));
   const word = power > 1500 ? "Dominant" : power > 700 ? "Strong" : power > 250 ? "Middling" : "Weak";
+  // Economy index = value of goods made per head, against the world's average (= 100).
+  const valPerHead = ids => { let v = 0, pop = 0; for (const p of ids) { const P = provs[p]; v += P.gamt.reduce((a, b) => a + b, 0); pop += P.rural + P.urban; } return v / Math.max(1, pop); };
+  const econ = Math.round(100 * valPerHead(R0.provs) / valPerHead(provs.map(P => P.id)));
   $("stats").innerHTML = [
-    ["Economy index", "112", `<span class="up">▲ 3</span> · world average = 100`, "Trade + production value per head, against the world average"],
-    ["Treasury", "25,450", "+3,100 / year", "Crown treasury and yearly revenue"],
+    ["Economy index", String(econ), `world average = 100`, "Value of goods made per head, against the world average"],
+    ["Treasury", treasury.toLocaleString("en"), `+${revenue.toLocaleString("en")} / year`, "Crown treasury and yearly revenue"],
     ["Realm power", fmt(power), word, "Population × cohesion × (treasury + revenue)"],
     ["Population", fmt(rural + urban), `${fmt(urban)} in towns · ${fmt(rural)} rural`, "Towns plus the countryside of every province"],
     ["Provinces", String(ps.length), `${ps.filter(P => P.order <= 2).length} restless`, "Provinces held by the crown"],
   ].map(([k, v, d, t]) => `<div class="stat" title="${t}"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
-  $("crumb").innerHTML = st.prov === null ? "" : `<a id="back">${R0.name}</a> › ${provs[st.prov].name}`;
-  const b = $("back"); if (b) b.onclick = () => { st.prov = null; st.tab = "overview"; render(); };
+  $("crumb").innerHTML = st.prov === null ? "" : `<a id="back">${R0.name}</a> › ` +
+    (st.city ? `<a id="backP">${provs[st.prov].name}</a> › ${provs[st.prov].town}` : provs[st.prov].name);
+  const b = $("back"); if (b) b.onclick = () => { st.prov = null; st.city = false; st.tab = "overview"; render(); };
+  const bp = $("backP"); if (bp) bp.onclick = () => { st.city = false; st.tab = "province"; render(); };
 }
 
 // ── tabs ────────────────────────────────────────────────────────────────────
 function tabs() {
-  const list = st.prov !== null ? [["province", provs[st.prov].name], ["overview", "Realm"]] : [["overview", "Overview"], ["provinces", "Provinces"], ["goods", "Goods"], ["edit", "Edit realms"]];
+  const list = st.city ? [["city", provs[st.prov].town + " · Government"], ["province", "Province"]]
+    : st.prov !== null ? [["province", provs[st.prov].name], ["pgov", "Government"], ["overview", "Realm"]]
+    : [["overview", "Overview"], ["gov", "Government"], ["provinces", "Provinces"], ["goods", "Goods"], ["edit", "Edit realms"]];
   $("tabs").innerHTML = list.map(([k, l]) => `<button class="tab ${st.tab === k ? "on" : ""}" role="tab" data-k="${k}">${l}</button>`).join("");
-  $("tabs").querySelectorAll(".tab").forEach(b => b.onclick = () => { st.tab = b.dataset.k; if (st.tab !== "province") st.prov = null; render(); });
+  $("tabs").querySelectorAll(".tab").forEach(b => b.onclick = () => {
+    st.tab = b.dataset.k;
+    if (st.tab === "province" || st.tab === "pgov") st.city = false;
+    else if (st.tab !== "city") { st.prov = null; st.city = false; }
+    render();
+  });
 }
 function realmGoods() {
   const R0 = realms[myRealm], tot = {};
   for (const p of R0.provs) { const P = provs[p]; P.goods.forEach((g, k) => { tot[g] = (tot[g] || 0) + P.gamt[k]; }); }
-  const need = { wheat: 9000, salt: 1800, timber: 2600, iron: 1400, wine: 2200, wool_fleece: 1500, hides: 900, stockfish: 1200 };
-  const keys = new Set([...Object.keys(tot), ...Object.keys(need)]);
-  return [...keys].map(g => ({ g, net: (tot[g] || 0) - (need[g] || Math.round((tot[g] || 0) * 0.35)), made: tot[g] || 0 })).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+  // What the realm's people use: per head per year, by kind of good (example rates).
+  const pop = R0.provs.reduce((a, p) => a + provs[p].rural + provs[p].urban, 0);
+  const PER_HEAD = { wheat: 0.03, barley: 0.012, salt: 0.006, timber: 0.008, iron: 0.004, wine: 0.006, wool_fleece: 0.005, hides: 0.003, stockfish: 0.004, herring: 0.004, oliveoil: 0.003, honey: 0.002, beer: 0.004 };
+  const keys = new Set([...Object.keys(tot), ...Object.keys(PER_HEAD)]);
+  return [...keys].map(g => ({ g, net: Math.round((tot[g] || 0) - pop * (PER_HEAD[g] ?? 0.0015)), made: tot[g] || 0 })).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
 }
 function pane() {
   const el = $("pane"), R0 = realms[myRealm], ps = R0.provs.map(p => provs[p]);
@@ -446,9 +510,65 @@ function pane() {
       <h3>Goods of the land</h3>
       ${P.goods.map((g, k) => { const s = camp ? P.gstate[k] : "worked"; return `<div class="goodrow" style="grid-template-columns:26px 110px minmax(0,1fr)">${s === "hidden" ? `<span class="hatch" style="width:24px;height:24px;display:inline-block"></span>` : iconHTML(g)}
         <span>${s === "hidden" ? "?" : LABEL(g)}</span><span class="state">${stateWord[s]}${s === "worked" ? " · " + fmt(P.gamt[k]) + " / yr" : ""}</span></div>`; }).join("")}
-      <div class="tip">Only goods of the land (grown, raised, gathered, caught, mined). Goods made in workshops never appear on a province map.</div>`;
+      <div class="tip">Only goods of the land (grown, raised, gathered, caught, mined). Goods made in workshops never appear on a province map.
+      Click the town (the larger dot) on the map to open its council.</div>`;
+  } else if (st.tab === "gov") {
+    const L = R0.laws, lvl = n => ["", "light", "moderate", "heavy"][n];
+    el.innerHTML = `<h3>The crown</h3>
+      <div class="kv"><span>Ruler</span><span>King Odric II, 46 · reigning 14 years · ambitious, just</span>
+      <span>Heir</span><span>Prince Aldwin, 19 (by ${L.succession.toLowerCase()})</span><span>Regent</span><span>none</span>
+      <span>Legitimacy</span><span>${"▰".repeat(Math.round(R0.legitimacy * 4))}${"▱".repeat(4 - Math.round(R0.legitimacy * 4))} ${Math.round(R0.legitimacy * 100)}%</span>
+      <span>Cohesion</span><span>${"▰".repeat(Math.round(R0.cohesion * 4))}${"▱".repeat(4 - Math.round(R0.cohesion * 4))} ${Math.round(R0.cohesion * 100)}%</span></div>
+      <h3>Royal council</h3>
+      <div class="tip">Offices go to the ruler's kin, great houses and famous notables; the largest city sends a delegate.</div>
+      ${COUNCIL.map(m => `<div class="realmrow"><span class="dot" style="background:${m.tone};width:12px;height:12px;border-radius:6px"></span>
+        <span style="width:96px;color:var(--rubric);font-family:var(--font-display)">${m.office}</span><span style="flex:1;min-width:0"><b>${m.who}</b><br><span class="state">${m.from}</span></span>
+        <span class="state" style="text-align:right;max-width:140px">${m.stance}</span></div>`).join("")}
+      <h3>Laws of the realm</h3>
+      <div class="kv"><span>Crown tax</span><span>${lvl(L.tax)} — more treasury, less loyalty and growth</span>
+      <span>Levies</span><span>${lvl(L.levy)} — men each province must raise</span>
+      <span>Succession</span><span>${L.succession}</span><span>Trade policy</span><span>${L.trade}</span>
+      <span>Town privileges</span><span>${lvl(L.townFee)} town fee — cities keep their own councils and pay this to the crown</span>
+      <span>Minority peoples</span><span>${L.tolerance}</span></div>
+      <h3>Recent decisions</h3>
+      <div class="tip">Year 211 · the council raised the levy (Marshal for, Treasurer against) · Year 207 · river tolls lowered to win back the Ostmark trade</div>`;
+  } else if (st.tab === "pgov") {
+    const P = provs[st.prov], G = P.gov, skim = G.honesty < 50 ? Math.round((50 - G.honesty) / 4) : 0;
+    const far = Math.hypot(P.cx - provs[R0.capital].cx, P.cy - provs[R0.capital].cy);
+    const risk = Math.round(Math.min(95, (100 - G.loyalty) * 0.5 + (4 - P.order) * 10 + far * 0.6));
+    el.innerHTML = `<h3>Governor</h3>
+      <div class="kv"><span>Governor</span><span><b>${G.name}</b> · appointed by the crown · ${G.years} years in office</span>
+      <span>Loyalty</span><span>${"▰".repeat(Math.round(G.loyalty / 25))}${"▱".repeat(4 - Math.round(G.loyalty / 25))} ${G.loyalty}%</span>
+      <span>Honesty</span><span>${"▰".repeat(Math.round(G.honesty / 25))}${"▱".repeat(4 - Math.round(G.honesty / 25))} ${G.honesty}%</span></div>
+      <h3>Accounts</h3>
+      <div class="kv"><span>Tax raised</span><span>${P.tax} a year</span><span>Kept by the governor</span><span style="color:${skim ? "var(--bad)" : "var(--good)"}">${skim ? skim + "% (" + Math.round(P.tax * skim / 100) + " a year)" : "nothing — an honest steward"}</span>
+      <span>Sent to the crown</span><span>${P.tax - Math.round(P.tax * skim / 100)} a year</span><span>Levy</span><span>${Math.round(P.rural * 0.01 * R0.laws.levy)} men</span></div>
+      <h3>Risk of breaking away</h3>
+      <div class="kv"><span>Risk</span><span style="color:${risk > 50 ? "var(--bad)" : risk > 25 ? "var(--warn)" : "var(--good)"}">${risk}% — ${risk > 50 ? "a disloyal governor far from the capital, over restless people" : risk > 25 ? "worth watching" : "secure"}</span>
+      <span>Why</span><span>loyalty ${G.loyalty}% · order ${["seething","restless","settled","calm"][P.order - 1]} · ${Math.round(far * 11)} km from the capital</span></div>
+      <div style="margin-top:8px"><button class="btn" id="replace">Replace governor</button></div>
+      <div class="tip">The crown replaces governors on its own when they fail; in the world builder you can replace them by hand.</div>`;
+    $("replace").onclick = () => { P.gov = { name: ["Wystan","Elin","Roderic","Saskia"][(Math.random() * 4) | 0] + " " + ["Varr","Ostley","of " + P.town][(Math.random() * 3) | 0], loyalty: 60 + ((Math.random() * 40) | 0), honesty: 40 + ((Math.random() * 60) | 0), years: 0 }; pane(); };
+  } else if (st.tab === "city") {
+    const P = provs[st.prov], C = P.council, fee = Math.round(P.urban / 400 * R0.laws.townFee);
+    const seats = Array.from({ length: C.seats }, (_, k) => ["#b0473a","#c99a3a","#4f8a5a","#5b6fa8"][(k * 7 + P.id) % 4]);
+    el.innerHTML = `<div style="font-family:var(--font-display);font-size:20px;color:var(--rubric)">${P.town}</div>
+      <div class="tip">${fmt(P.urban)} people · market town of ${P.name} · in the ${R0.name}</div>
+      <h3>${C.form}</h3>
+      <svg viewBox="0 0 200 70" style="width:100%;max-width:300px;height:auto" aria-label="Council seats">${seats.map((c, k) => { const a = Math.PI * (1 - (k + 0.5) / C.seats); return `<circle cx="${100 + 80 * Math.cos(a)}" cy="${65 - 55 * Math.sin(a)}" r="8" fill="${c}" stroke="#2b2419"/>`; }).join("")}</svg>
+      <div class="kv"><span>Seats</span><span>${C.seats} — merchants, guilds and old families (colour = allegiance)</span>
+      <span>Motion</span><span>"Lower the bridge toll" · round 2 of 3 · leaning for</span>
+      <span>Pays the crown</span><span>${fee} a year (town privileges: ${["", "light", "moderate", "heavy"][R0.laws.townFee]})</span>
+      <span>Royal council</span><span>${R0.capital === P.id ? "sends the city delegate" : "no seat — not among the largest cities"}</span></div>
+      <div class="tip">Cities always keep their own council; this is the existing city government, reached from the province.</div>`;
   } else if (st.tab === "edit") {
     el.innerHTML = `<div class="tip">Realms are generated when the world finishes, in random sizes (a single province up to a great kingdom). Recolour, rename, assign provinces or found a new realm.</div>
+      <h3>When a campaign starts</h3>
+      <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px;font-size:12px">
+        ${[["continue", "Continue as built — these realms, rulers and laws"], ["random", "Randomise — new realms of random sizes"], ["zero", "Start from nothing — no realms; the whole history is simulated"]]
+          .map(([k, l]) => `<label><input type="radio" name="start" value="${k}" ${st.start === k ? "checked" : ""}> ${l}</label>`).join("")}
+      </div>
+      <h3>Realms</h3>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="btn" id="regen">Regenerate starting realms</button><button class="btn" id="newR">+ New realm</button>
       <button class="btn ${st.assign ? "on" : ""}" id="assign">${st.assign ? "Stop assigning" : "Assign provinces"}</button></div>
       ${realms.slice(0, 14).map((r, k) => `<div class="realmrow"><span class="swatch" data-k="${k}" style="background:${r.color};width:20px;height:20px"></span>
@@ -456,6 +576,7 @@ function pane() {
         <span class="state">${r.provs.length} prov.</span><button class="btn ${st.editRealm === k ? "on" : ""}" data-pick="${k}">${st.editRealm === k ? "selected" : "select"}</button></div>
         ${st.pal === k ? `<div class="palette">${PALETTE.map(c => `<span data-c="${c}" style="background:${c}"></span>`).join("")}<input type="color" value="${r.color}" id="custom" aria-label="Custom colour" style="grid-column:span 8;width:100%"></div>` : ""}`).join("")}
       ${realms.length > 14 ? `<div class="tip">…and ${realms.length - 14} more small realms and free cities.</div>` : ""}`;
+    el.querySelectorAll('input[name=start]').forEach(r => r.onchange = () => { st.start = r.value; });
     $("regen").onclick = () => { makeRealms((Math.random() * 1e9) | 0); st.editRealm = 0; render(); };
     $("newR").onclick = () => { realms.push({ name: "New Realm", color: PALETTE[realms.length % PALETTE.length], provs: [], capital: -1 }); st.editRealm = realms.length - 1; st.assign = true; render(); };
     $("assign").onclick = () => { st.assign = !st.assign; render(); };
