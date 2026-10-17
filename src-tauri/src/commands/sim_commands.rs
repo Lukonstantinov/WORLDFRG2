@@ -32,6 +32,28 @@ fn persist_goods_placement(
     Ok(())
 }
 
+/// Goods batch G5 · mark which ore workings the towns know at year 0
+/// (`deposits::mark_known`) and store the result. With no towns at all, every
+/// working stays known (the default), so a world without people is unchanged.
+fn persist_known_deposits(
+    conn: &rusqlite::Connection,
+    ore: &mut [crate::sim::deposits::Deposit],
+    towns: &[settlements::Settlement],
+    grid_w: u32,
+) -> Result<(), String> {
+    if towns.is_empty() { return Ok(()); }
+    let cells: Vec<(f32, f32)> = towns.iter().map(|t| (t.x as f32, t.y as f32)).collect();
+    crate::sim::deposits::mark_known(ore, &cells, grid_w);
+    metadata::set_meta(conn, "deposits", &serde_json::to_string(ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+/// The towns already stored for this world (empty before the People stage runs).
+fn stored_towns(conn: &rusqlite::Connection) -> Vec<settlements::Settlement> {
+    metadata::campaign_get_or_meta(conn, "settlements").ok().flatten()
+        .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+}
+
 /// GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — read a step panel's own
 /// persisted setting back out of `metadata`, falling back to `default` for a
 /// world that has never run that step (or was generated before this slice),
@@ -463,8 +485,9 @@ pub fn sim_biological(
     // belt column cannot carry. Persisted alongside the tiles exactly as the
     // province list is — the belt stays the source of truth for production and
     // overlays; this is the record a mining industry and the quarry view read.
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
+    let (mut ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
+    persist_known_deposits(&conn, &mut ore, &stored_towns(&conn), buf.width)?;
 
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
     // production, from the world's stored lake set loaded above.
@@ -536,8 +559,9 @@ pub fn sim_refresh_hydrology_biology(
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    let (mut ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
+    persist_known_deposits(&conn, &mut ore, &stored_towns(&conn), buf.width)?;
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Refresh hydrology & biology")?;
@@ -719,7 +743,7 @@ pub fn sim_run_all(
     // ore-district count / spread sliders, read back instead of hardcoded.
     let gem_deposits = meta_u32(&conn, "gem_deposits", 6);
     let climate_strictness = meta_f32(&conn, "climate_strictness", 0.5);
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    let (mut ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
@@ -755,6 +779,8 @@ pub fn sim_run_all(
     // it returns, or they exist only in the persisted province metadata and
     // never become a real place on the map/routes/goods catchments.
     generated_settlements.extend(province_result.founded_settlements);
+    // G5 · which workings these towns know at year 0.
+    persist_known_deposits(&conn, &mut ore, &generated_settlements, buf.width)?;
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -1143,7 +1169,7 @@ pub fn sim_run_all_from_terrain(
     // ore-district count / spread sliders, read back instead of hardcoded.
     let gem_deposits = meta_u32(&conn, "gem_deposits", 6);
     let climate_strictness = meta_f32(&conn, "climate_strictness", 0.5);
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    let (mut ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
@@ -1174,6 +1200,8 @@ pub fn sim_run_all_from_terrain(
     // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) / rule 34 — see the
     // identical fold in `sim_run_all`.
     generated_settlements.extend(province_result.founded_settlements);
+    // G5 · which workings these towns know at year 0.
+    persist_known_deposits(&conn, &mut ore, &generated_settlements, buf.width)?;
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
@@ -1287,6 +1315,9 @@ pub fn sim_generate_settlements(
     let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits").ok().flatten()
         .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
     result.extend(settlements::generate_resource_towns(&buf, &deposits, &result));
+    // G5 · which workings these towns know at year 0.
+    let mut deposits = deposits;
+    persist_known_deposits(&conn, &mut deposits, &result, buf.width)?;
 
     // Persist the habitability field so the Habitability heatmap layer can render.
     settlements::write_habitability(&mut buf, &hab_fields.hab);

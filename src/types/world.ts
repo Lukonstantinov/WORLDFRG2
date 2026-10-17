@@ -96,6 +96,16 @@ export interface ExplainFactor {
 }
 
 /** Rust `CellExplanation` — `explain_cell`. `lat` honours the full latitude frame. */
+/** Mirrors `query_commands::DepositSite` (goods batch G5). */
+export interface DepositSite {
+  good: string;
+  x: number;
+  y: number;
+  grade: number;
+  depth: number;
+  known: boolean;
+}
+
 export interface CellExplanation {
   lat: number;
   is_land: boolean;

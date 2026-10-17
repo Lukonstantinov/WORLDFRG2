@@ -1721,3 +1721,26 @@ mod province_goods_mask_tests {
         assert!(masks.is_empty(), "an uncovered good must not appear in the result at all");
     }
 }
+
+/// Goods batch G5 · one ore/gem/stone WORKING for the map's Deposits layer: a
+/// known working draws as an exact site, an unknown one only as a faint tint.
+#[derive(Serialize, Clone)]
+pub struct DepositSite {
+    pub good: String,
+    pub x: u32,
+    pub y: u32,
+    pub grade: f32,
+    pub depth: u8,
+    pub known: bool,
+}
+
+/// Every working this world's geology placed (`metadata["deposits"]`, §8.16).
+#[tauri::command]
+pub fn get_deposit_sites(db: State<'_, WorldDb>) -> Result<Vec<DepositSite>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let ds: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits").ok().flatten()
+        .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    Ok(ds.into_iter()
+        .map(|d| DepositSite { good: d.good, x: d.x, y: d.y, grade: d.grade, depth: d.depth, known: d.known })
+        .collect())
+}

@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, HazardZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute, HouseAtlas } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, HazardZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute, HouseAtlas, DepositSite } from "@types";
 import type { ClimateBands } from "@bridge";
 
 /** A drawable lane: the points, the MEDIUM of each point, and whether the whole
@@ -834,6 +834,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
+    deposits: false,
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
@@ -2354,6 +2355,44 @@ export class OverlayManager {
     this.chokepoints = chokepoints;
   }
 
+  /** Goods batch G5 · the world's ore/gem/stone workings and the grid width (for km). */
+  private depositSites: DepositSite[] = [];
+  private depositGridW = 0;
+  setDepositSites(sites: DepositSite[], gridW: number) {
+    this.depositSites = sites;
+    this.depositGridW = gridW;
+  }
+
+  /** A KNOWN working draws as its good's icon on the exact cell. An UNKNOWN one
+   *  draws only as a faint tint ~70 km across, centred up to ~40 km off the site,
+   *  so it says "this country may hold silver" without giving the mine away. */
+  private renderDepositSites(ctx: CanvasRenderingContext2D) {
+    const kmPerCell = 40075 / Math.max(1, this.depositGridW);
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const colorOf = (g: string) => GOOD_DEFS.find((d) => d.name === g)?.color ?? "#c8b070";
+    for (const d of this.depositSites) {
+      if (d.known) continue;
+      const rgb = parseColor(colorOf(d.good)) ?? [200, 176, 112];
+      // Desaturate toward grey: a hint, not a claim.
+      const [r, g, b] = rgb.map((c) => Math.round(c * 0.55 + 128 * 0.45));
+      const h = (Math.imul(d.x, 73856093) ^ Math.imul(d.y, 19349663)) >>> 0;
+      const cx = d.x + 0.5 + ((h & 255) / 255 - 0.5) * (80 / kmPerCell);
+      const cy = d.y + 0.5 + (((h >>> 8) & 255) / 255 - 0.5) * (80 / kmPerCell);
+      const rad = 35 / kmPerCell;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      grad.addColorStop(0, `rgba(${r},${g},${b},0.28)`);
+      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const d of this.depositSites) {
+      if (!d.known) continue;
+      drawGoodIcon(ctx, d.good, d.x + 0.5, d.y + 0.5, Math.max(1.6, 4.5 * inv), colorOf(d.good));
+    }
+  }
+
   drawCorridors(corridors: EconCorridor[], gridW: number) {
     this.corridors = corridors;
     this.worldW = gridW;
@@ -3387,6 +3426,10 @@ export class OverlayManager {
       this.withOpacity(ctx, 'figureMarks', (ctx) => {
       this.renderEmojiMarks(ctx, this.figureMarks, "#9070c0");
     });
+    }
+    // Goods batch G5 · ore/gem/stone workings (known exact, unknown tinted).
+    if (this.visibility.deposits && this.depositSites.length > 0) {
+      this.withOpacity(ctx, 'deposits', (c) => this.renderDepositSites(c));
     }
     // Phase 6 · landmarks & sacred sites.
     if (this.visibility.landmarks && this.landmarkMarks.length > 0) {

@@ -866,3 +866,22 @@ placement exactly. Gates: `goods_` 23/23 incl. new
 tsc; check_types 0 drift. **Queued** (rule 36): reach GROWING in the campaign (crops
 spreading along trade routes, stolen secrets) — §9.3's later slice, needs a tick pass
 and the econ_ gates.
+
+**Slice G5a: unknown deposits at year 0 (2026-10-17, done).** Every ore/gem/stone working
+now carries `Deposit.known`. `deposits::mark_known` sets it once towns exist: a working
+is known if it is not deep (`depth < DEPTH_DEEP`) and a town lies within `KNOWN_KM`
+(80 km); everything else is undiscovered. It runs after every town (incl. resource
+towns and province seats) in both run-alls, in the Settlements step, and when Goods
+re-runs on a world that already has towns. With no towns, all workings stay known, so a
+world without people is unchanged. **The year-0 economy credits only known workings**
+(`compute_economy`), so a far-off or deep gold field produces nothing until it is found.
+New map layer **⛏ Deposits** (`get_deposit_sites`, `OverlayManager.renderDepositSites`):
+a known working draws as its good's icon on the exact cell; an unknown one only as a
+faint, desaturated tint ~70 km across, centred up to ~40 km off the site ("this country
+may hold silver"), so it never gives the mine away. Gates: `goods_` 24/24 (new
+`goods_known_deposits_are_the_shallow_ones_near_towns`, incl. the X seam), the economy
+test now also asserts an undiscovered working beside a town produces nothing,
+`settlements` 7/7, `cargo check --lib --tests`, tsc, check_types 0 drift (279).
+**Next (G5b):** discovery in the campaign — a town finds the workings around it over
+time, deeper ones as mining technology grows, chronicled ("Silver found near Kesh, 1243").
+**Queued:** the province views still list every deposit; they should mark unknown ones.

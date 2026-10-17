@@ -12,7 +12,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1391,6 +1391,16 @@ export function MapCanvas() {
     if (!worldKey) return;
     getEconomy().then((e) => setEconomy(e.hubs.length > 0 ? e : null)).catch(() => {});
   }, [worldKey, setEconomy]);
+
+  // Goods batch G5 · ore/gem/stone workings for the Deposits layer; refetched when
+  // Resources (goods) or People (which marks what towns know) re-runs.
+  const step7Known = useUIStore((s) => s.stepCompleted[7]);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !worldKey || !meta) return;
+    getDepositSites().then((s) => { om.setDepositSites(s, meta.grid_width); requestRender(); }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worldKey, step8Done, step7Known]);
 
   // Economy chokepoints + trade-region territories — product of the Economy step.
   useEffect(() => {

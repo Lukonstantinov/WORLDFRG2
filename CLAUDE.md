@@ -2710,6 +2710,8 @@ commands/
                                   rain shadow, offshore current, soil, fever — read-only);
                                   trade routes/matrix/trunks + compute_itinerary
       overlays.rs · political.rs  reef/storm/monsoon hazard zones + good/culture regions;
+                                  overlays.rs also serves `get_deposit_sites` (goods G5:
+                                  every working + whether towns KNOW it at year 0);
                                   overlays.rs also carries `compute_good_belt_masks`
                                   (§8.19) — the FULL-RESOLUTION two-layer belt mask;
       economy.rs · flow.rs        political ranking; market economy; dynamic trade flow

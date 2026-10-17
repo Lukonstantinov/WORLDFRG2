@@ -139,7 +139,7 @@ const OPACITY_CAPABLE = new Set([
   "fisheryBanks", "cultures", "states",
   "stormZones", "monsoonZones", "reefZones", "tradeRoutes",
   "politicalInfluence", "speculation", "figureMarks", "landmarks",
-  "chokepoints", "migrations", "settlements",
+  "chokepoints", "migrations", "settlements", "deposits",
 ]);
 
 const overlayTypes = [
@@ -153,6 +153,7 @@ const overlayTypes = [
   { id: "tradeRoutes", label: "Trade Routes" },
   { id: "tradeFlows", label: "Trade Flows" },
   { id: "fisheryBanks", label: "Fishery Banks" },
+  { id: "deposits", label: "\u26CF Deposits" },
 ];
 
 // Biological / political sublayer overlays (grouped separately).

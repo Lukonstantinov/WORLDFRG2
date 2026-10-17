@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CampaignInfo, CellExplanation, CellInfo, EconomySnapshot, LakeData, LakeNode, OpenWorldResult, PaintValue, RidgeLine, RiverData, RiverNode, Settlement, SimRiversResult, SimRunAllResult, SimSettlementsResult, TileResponse, Toponym, WorldMeta, RenderPalettes } from "@types";
+import type { CampaignInfo, CellExplanation, CellInfo, DepositSite, EconomySnapshot, LakeData, LakeNode, OpenWorldResult, PaintValue, RidgeLine, RiverData, RiverNode, Settlement, SimRiversResult, SimRunAllResult, SimSettlementsResult, TileResponse, Toponym, WorldMeta, RenderPalettes } from "@types";
 import type { ElevationBand, OverlayVectors, OverlaysState, Streamline } from "./types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
@@ -131,6 +131,11 @@ export async function getCellInfo(wx: number, wy: number): Promise<CellInfo> {
 /** "Why is this cell like this?" — a causal chain from stored world data. */
 export async function explainCell(wx: number, wy: number): Promise<CellExplanation> {
   return invoke("explain_cell", { wx, wy });
+}
+
+/** Every ore/gem/stone working, known or not (goods batch G5). */
+export async function getDepositSites(): Promise<DepositSite[]> {
+  return invoke("get_deposit_sites");
 }
 
 export async function undoAction(): Promise<[number, number][] | null> {

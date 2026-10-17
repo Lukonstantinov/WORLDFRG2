@@ -581,7 +581,7 @@ export const useUIStore = create<UIStore>((set) => ({
     // Per-feature-type toponym label toggles (gated under the master `toponyms`).
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     toponymsDesert: true, toponymsForest: true, toponymsTundra: true,
-    plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false, states: false,
+    plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false, states: false, deposits: false,
     // CLAUDE.md §8.19 (goods localities, shipped) D9 · the TWO layers a goods belt carries, toggled
     // independently of each other and of WHICH goods are shown. Coverage answers
     // "can it grow here" (the belt's honest extent, so a belt thinned by Slice 3's

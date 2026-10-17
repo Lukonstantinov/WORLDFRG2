@@ -1627,7 +1627,7 @@ mod resource_town_tests {
             manual: false, edited: false, primary: false }
     }
     fn dep(good: &str, district: u32, x: u32, y: u32, grade: f32, depth: u8) -> Deposit {
-        Deposit { good: good.into(), x, y, district, grade, extent: 2, depth,
+        Deposit { known: true, good: good.into(), x, y, district, grade, extent: 2, depth,
             model: DepositModel::Craton, working: WorkingKind::Open }
     }
 

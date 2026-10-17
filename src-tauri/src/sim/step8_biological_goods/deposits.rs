@@ -276,6 +276,40 @@ pub struct Deposit {
     /// save; every live placement path sets it explicitly.
     #[serde(default = "default_open_working")]
     pub working: WorkingKind,
+    /// Goods batch G5 · whether anyone knows this working exists at year 0. A town
+    /// within `KNOWN_KM` knows its shallow workings; deep ones and remote ones are
+    /// found later (campaign discovery). Defaults to true, so a save from before
+    /// this field, and a world with no towns yet, behave exactly as before.
+    #[serde(default = "default_known")]
+    pub known: bool,
+}
+
+fn default_known() -> bool { true }
+
+/// G5 · a town knows the shallow workings within this distance (about one day's
+/// walk out and back; a town's own catchment runs 50-120 km).
+pub const KNOWN_KM: f32 = 80.0;
+
+/// G5 · mark which workings are known at year 0, from the towns that exist: a
+/// working is known if it is not deep (`depth < DEPTH_DEEP`) and some town lies
+/// within `KNOWN_KM`. `towns` are world-cell positions; X wraps. Returns how many
+/// are known.
+pub fn mark_known(deposits: &mut [Deposit], towns: &[(f32, f32)], grid_w: u32) -> usize {
+    let w = grid_w.max(1) as f32;
+    let r_cells = KNOWN_KM / (40075.0 / w);
+    let r2 = r_cells * r_cells;
+    let mut known = 0;
+    for d in deposits.iter_mut() {
+        let near = towns.iter().any(|&(tx, ty)| {
+            let mut dx = (tx - d.x as f32).abs();
+            if dx > w / 2.0 { dx = w - dx; }
+            let dy = ty - d.y as f32;
+            dx * dx + dy * dy <= r2
+        });
+        d.known = d.depth < DEPTH_DEEP && near;
+        known += d.known as usize;
+    }
+    known
 }
 
 fn default_open_working() -> WorkingKind { WorkingKind::Open }
@@ -1073,7 +1107,7 @@ pub fn place_mineral(
             // Supergene enrichment sits ABOVE the parent, so it is by definition a
             // surface deposit and it is small.
             let grade = (0.45 + 0.45 * hash01(gs ^ 0xA17E ^ (k as u64) << 7)).clamp(0.0, 1.0);
-            let dep = Deposit {
+            let dep = Deposit { known: true,
                 good: plan.id.to_string(),
                 x: p.x,
                 y: p.y,
@@ -1280,7 +1314,7 @@ pub fn place_mineral(
                 // the lode it came from — which is precisely why placers were
                 // worked first.
                 let grade = (parent.grade * (0.85 + 0.35 * hash01(ks ^ 0xD4))).clamp(0.0, 1.0);
-                let dep = Deposit {
+                let dep = Deposit { known: true,
                     good: plan.id.to_string(),
                     x,
                     y,
@@ -1393,7 +1427,7 @@ fn make_working(
         DEPTH_FLOODED
     };
 
-    Deposit {
+    Deposit { known: true,
         good: plan.id.to_string(),
         x,
         y,
@@ -1744,7 +1778,7 @@ mod tests {
     /// exist yet, not present output.
     #[test]
     fn depth_attenuates_workable_intensity() {
-        let mk = |depth: u8| Deposit {
+        let mk = |depth: u8| Deposit { known: true,
             good: "gold".into(),
             x: 0,
             y: 0,
@@ -1759,6 +1793,20 @@ mod tests {
         let d = mk(DEPTH_DEEP).workable_intensity();
         let f = mk(DEPTH_FLOODED).workable_intensity();
         assert!(s > d && d > f, "depth must attenuate: {s} {d} {f}");
+    }
+
+    /// G5 · a town knows its own shallow workings; a deep one beside it, and any
+    /// working far from every town, stay unknown. X wraps across the seam.
+    #[test]
+    fn goods_known_deposits_are_the_shallow_ones_near_towns() {
+        let mk = |x: u32, depth: u8| Deposit { known: true, good: "silver".into(), x, y: 50, district: 0,
+            grade: 0.8, extent: EXTENT_MODERATE, depth, model: DepositModel::VolcanicArc, working: WorkingKind::Open };
+        // 3600 cells wide → ~11 km/cell, so KNOWN_KM (80) is ~7 cells.
+        let mut ds = vec![mk(105, DEPTH_SURFACE), mk(105, DEPTH_DEEP), mk(400, DEPTH_SURFACE), mk(3597, DEPTH_SHALLOW)];
+        let n = mark_known(&mut ds, &[(100.0, 50.0), (2.0, 50.0)], 3600);
+        let known: Vec<bool> = ds.iter().map(|d| d.known).collect();
+        assert_eq!(known, vec![true, false, false, true], "shallow+near, deep, remote, across the seam");
+        assert_eq!(n, 2);
     }
 
     /// Every shipped deposit mineral must actually place something on a plain

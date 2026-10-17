@@ -410,7 +410,10 @@ fn compute_economy_impl(
             .unwrap_or(false))
         .collect();
     let deposits_early: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
-        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        .ok().flatten().and_then(|s| serde_json::from_str::<Vec<crate::sim::deposits::Deposit>>(&s).ok()).unwrap_or_default()
+        // G5 · an undiscovered working produces nothing at year 0; the campaign's
+        // discovery pass is what opens it.
+        .into_iter().filter(|d| d.known).collect();
     let good_slot_early: std::collections::HashMap<&str, usize> =
         specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
     let mut prod = vec![vec![0.0f32; gc]; nn];
@@ -1650,12 +1653,14 @@ mod economy_connectivity_tests {
             }
             buf.save(&conn, "test").unwrap();
         }
-        let gold = crate::sim::deposits::Deposit {
+        let gold = crate::sim::deposits::Deposit { known: true,
             good: "gold".into(), x: 1002, y: 10, district: 0, grade: 0.9, extent: 3, depth: 0,
             model: crate::sim::deposits::DepositModel::CollisionalOrogen,
             working: crate::sim::deposits::WorkingKind::Open,
         };
-        metadata::set_meta(&conn, "deposits", &serde_json::to_string(&vec![gold]).unwrap()).unwrap();
+        // G5 · an UNKNOWN working beside the second town produces nothing at year 0.
+        let hidden = crate::sim::deposits::Deposit { known: false, x: 1502, ..gold.clone() };
+        metadata::set_meta(&conn, "deposits", &serde_json::to_string(&vec![gold, hidden]).unwrap()).unwrap();
         let json = r#"[
             {"x":1000,"y":10,"score":100,"population":20000},
             {"x":1500,"y":10,"score":99,"population":20000}
@@ -1667,7 +1672,7 @@ mod economy_connectivity_tests {
         let (gold_a, wheat_a) = (amount(0, "gold"), amount(0, "wheat"));
         assert!(gold_a > 0.0, "the mining town must still read as a gold producer");
         assert!(gold_a <= 0.1 * wheat_a, "gold {gold_a} must be a small fraction of grain {wheat_a}");
-        assert_eq!(amount(1, "gold"), 0.0, "a town with no working produces no gold");
+        assert_eq!(amount(1, "gold"), 0.0, "a town whose only working is undiscovered produces no gold");
     }
 
     /// The straight-line link ceiling in fine cells, so a fixture places its hubs
